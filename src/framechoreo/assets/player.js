@@ -15,6 +15,19 @@
     return b;
   };
   const count = (number, noun) => number + " " + noun + (number === 1 ? "" : "s");
+  const blankKind = (cell) =>
+    cell.type === "string" && !cell.display.trim()
+      ? cell.display.length
+        ? "whitespace"
+        : "empty"
+      : null;
+  const displayValue = (cell) => (blankKind(cell) ? JSON.stringify(cell.display) : cell.display);
+  const typeDescription = (cell) =>
+    blankKind(cell) === "empty"
+      ? "empty string"
+      : blankKind(cell) === "whitespace"
+        ? "whitespace-only string (" + count([...cell.display].length, "character") + ")"
+        : cell.type;
   try {
     const data = JSON.parse(document.getElementById("framechoreo-data").textContent);
     const model = globalThis.FrameChoreoModel,
@@ -27,10 +40,11 @@
       speed: 1,
       all: false,
       selection: null,
+      selectionLocation: null,
       inspection: null,
       returnAll: false,
       originPage: 0,
-      reduceMotion: reduced.matches,
+      reduceMotion: false,
     };
     let timer = null,
       deadline = 0,
@@ -64,7 +78,7 @@
     const motionLabel = el("label", "motion-toggle"),
       motionCheckbox = el("input");
     motionCheckbox.type = "checkbox";
-    motionCheckbox.checked = state.reduceMotion;
+    motionCheckbox.checked = state.reduceMotion || reduced.matches;
     motionCheckbox.disabled = reduced.matches;
     motionCheckbox.addEventListener("change", () => {
       state.reduceMotion = motionCheckbox.checked;
@@ -139,9 +153,12 @@
     body.append(limitInfo);
     const inspector = el("section", "inspector");
     inspector.setAttribute("aria-label", "Value origins");
+    inspector.tabIndex = -1;
     root.append(inspector);
     const inspectorHead = el("div", "inspector-head", "SELECT A VALUE"),
       selectedValue = el("div", "selected-value", "Select any cell to trace its value inputs.");
+    inspectorHead.id = "framechoreo-selected-cell";
+    inspector.setAttribute("aria-describedby", inspectorHead.id);
     const selectedType = el("div", "value-type");
     const columnDtype = el("div", "value-type column-dtype");
     const origins = el("div", "origins"),
@@ -153,6 +170,7 @@
         settleAnimations();
         const target = board.querySelector(".cell.selected") || caption;
         state.selection = null;
+        state.selectionLocation = null;
         state.originPage = 0;
         inspectorHead.textContent = "SELECT A VALUE";
         selectedValue.textContent = "Select any cell to trace its value inputs.";
@@ -163,6 +181,7 @@
         explanation.textContent = "";
         explanation.classList.remove("calculation-note");
         clearSelection.hidden = true;
+        returnSelection.hidden = true;
         refreshSelection();
         reveal(target);
       },
@@ -170,8 +189,13 @@
     );
     clearSelection.dataset.action = "clear-selection";
     clearSelection.hidden = true;
-    const inspectorTitle = el("div", "inspector-titlebar");
-    inspectorTitle.append(inspectorHead, clearSelection);
+    const returnSelection = button("Back to selected cell", returnToSelection, "text-button");
+    returnSelection.dataset.action = "return-selection";
+    returnSelection.hidden = true;
+    const inspectorTitle = el("div", "inspector-titlebar"),
+      inspectorActions = el("div", "inspector-actions");
+    inspectorActions.append(returnSelection, clearSelection);
+    inspectorTitle.append(inspectorHead, inspectorActions);
     inspector.append(
       inspectorTitle,
       selectedValue,
@@ -278,13 +302,24 @@
       const tableData = steps.get(step),
         cell = tableData.rows[row].cells[tableData.columns.indexOf(column)];
       state.selection = null;
+      state.selectionLocation = {
+        step,
+        row,
+        column,
+        index: state.index,
+        inspection: state.inspection,
+        all: state.all,
+        returnAll: state.returnAll,
+        remainingHold,
+      };
       state.originPage = 0;
       inspectorHead.textContent =
         model.tableLabel(data, tableData) + " · row " + (row + 1) + " · " + column;
-      selectedValue.textContent = cell.display;
-      selectedType.textContent = "Type: " + cell.type;
+      selectedValue.textContent = displayValue(cell);
+      selectedType.textContent = "Type: " + typeDescription(cell);
       columnDtype.textContent = dtypeLabel(step, column);
       clearSelection.hidden = false;
+      returnSelection.hidden = false;
       explanation.classList.remove("calculation-note");
       origins.replaceChildren();
       originPager.replaceChildren();
@@ -307,10 +342,36 @@
         explanation.textContent = error.message;
       }
       refreshSelection();
+      reveal(inspector, "start");
     }
-    function reveal(node) {
+    function reveal(node, block = "center") {
       node.focus({ preventScroll: true });
-      node.scrollIntoView({ block: "center", behavior: "auto" });
+      node.scrollIntoView({ block, behavior: "auto" });
+    }
+    function findBoardCell(target) {
+      return [...board.querySelectorAll(".cell")].find(
+        (b) =>
+          b.dataset.step === target.step &&
+          Number(b.dataset.row) === target.row &&
+          b.dataset.column === target.column,
+      );
+    }
+    function returnToSelection() {
+      const target = state.selectionLocation;
+      if (!target) return;
+      stop();
+      state.index = target.index;
+      state.inspection = target.inspection;
+      state.all = target.all;
+      state.returnAll = target.returnAll;
+      remainingHold = target.remainingHold;
+      if (activeScene().table.id !== target.step) {
+        inspectStep(target.step, target);
+        return;
+      }
+      lastKey = null;
+      render();
+      reveal(findBoardCell(target) || caption);
     }
     function inspectStep(step, target = null, all = false) {
       stop();
@@ -319,14 +380,7 @@
       state.all = all || (target !== null && target.row >= 12);
       lastKey = null;
       render();
-      const cell =
-        target &&
-        [...board.querySelectorAll(".cell")].find(
-          (b) =>
-            b.dataset.step === target.step &&
-            Number(b.dataset.row) === target.row &&
-            b.dataset.column === target.column,
-        );
+      const cell = target && findBoardCell(target);
       reveal(cell || caption);
     }
     function renderOrigins() {
@@ -336,6 +390,9 @@
       originPager.replaceChildren();
       for (const origin of inputs.slice(offset, offset + 50)) {
         const b = button("", () => inspectStep(origin.step, origin), "origin");
+        const value = el("span", "value", displayValue(origin.cell));
+        if (blankKind(origin.cell)) value.dataset.blank = blankKind(origin.cell);
+        b.title = "Type: " + typeDescription(origin.cell);
         b.append(
           el(
             "span",
@@ -346,7 +403,7 @@
               " · " +
               origin.column,
           ),
-          el("span", "value", origin.cell.display),
+          value,
         );
         origins.append(b);
       }
@@ -389,19 +446,25 @@
       });
     }
     function cellButton(step, row, column, cell) {
-      const b = button(cell.display, () => selectCell(step, row, column), "cell");
+      const b = button(displayValue(cell), () => selectCell(step, row, column), "cell");
       b.dataset.step = step;
       b.dataset.row = String(row);
       b.dataset.column = column;
       b.dataset.type = cell.type;
+      if (blankKind(cell)) b.dataset.blank = blankKind(cell);
       const dtype = dtypeLabel(step, column);
-      b.title = cell.display + "\nType: " + cell.type + (dtype ? "\n" + dtype : "");
+      b.title =
+        displayValue(cell) + "\nType: " + typeDescription(cell) + (dtype ? "\n" + dtype : "");
       b.setAttribute(
         "aria-label",
         column +
           ": " +
-          cell.display +
-          (cell.type === "missing" ? " (missing)" : "") +
+          displayValue(cell) +
+          (cell.type === "missing"
+            ? " (missing)"
+            : blankKind(cell)
+              ? " (" + typeDescription(cell) + ")"
+              : "") +
           "; trace value inputs",
       );
       return b;
@@ -722,8 +785,7 @@
       if (document.hidden) stop();
     });
     reduced.addEventListener("change", () => {
-      state.reduceMotion = reduced.matches;
-      motionCheckbox.checked = reduced.matches;
+      motionCheckbox.checked = state.reduceMotion || reduced.matches;
       motionCheckbox.disabled = reduced.matches;
       stop();
       lastKey = null;

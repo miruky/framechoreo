@@ -58,11 +58,13 @@ def main() -> None:
             "tests/test_scalar_fidelity.py",
             "tests/test_empty_lineage.py",
             "tests/player-integrity.test.cjs",
+            "tests/player-navigation.test.cjs",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
             "examples/notebook.ipynb",
             "examples/float_precision.py",
+            "examples/blank_strings.py",
             "docs/api.md",
             "LICENSE",
         ]:

@@ -50,6 +50,8 @@ python -m ruff format --check .
 python examples/sales_story.py
 python examples/missing_values.py
 python examples/classroom.py
+python examples/float_precision.py
+python examples/blank_strings.py
 python -m build
 python -m twine check dist/*
 python tests/check_distribution.py

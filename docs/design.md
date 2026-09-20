@@ -39,6 +39,13 @@ preferences, does not autoplay on load, and stops at the last scene. Playback ne
 reruns pandas. Pausing keeps both row motion and remaining scene time; changing
 speed preserves progress. Visible row limits are disclosed and do not change
 calculations. Origin pages and a full right-input view keep recorded data reachable.
+Selecting a cell focuses and reveals the origins section. A separate return location
+keeps the selected scene, row expansion, and hold time, even when tracing fails or
+the reader visits another source table. The player's motion preference is separate
+from the system's preference, so system changes do not erase the reader's choice.
+
+Empty and whitespace-only strings are quoted and labeled by the renderer. This does
+not alter their encoded values or collapse them into missing values.
 
 ## Serialization
 

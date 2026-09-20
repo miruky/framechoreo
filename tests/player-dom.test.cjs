@@ -169,6 +169,14 @@ test("all rows of a derived right input are available and identified as an input
   assert.equal(p.document.activeElement, p.document.querySelector(".stage-heading h2"));
   p.click(".stage-body > .text-button");
   assert.equal(p.scene(), "MERGE");
+  p.click(".reference summary");
+  p.click('.ref-table .cell[data-row="10"][data-column="v"]');
+  p.click(".origin");
+  p.click('[data-action="return-selection"]');
+  assert.equal(p.scene(), "INPUT");
+  assert.equal(p.document.activeElement.dataset.step, "f");
+  assert.equal(p.document.activeElement.dataset.row, "10");
+  assert.equal(p.document.querySelector(".selected-value").textContent, "11");
 });
 
 test("the selected cell exposes its value type", (t) => {

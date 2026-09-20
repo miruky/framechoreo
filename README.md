@@ -114,6 +114,11 @@ insufficient non-missing inputs and flag recorded integer sums that differ from
 exact addition, helping identify dtype overflow while preserving the pandas result.
 Selecting a cell also shows its column dtype. Native float16/float32 formatting is
 retained; equal short decimal text can still hide different floating-point values.
+Selecting a value brings its origins into view and moves keyboard focus there.
+**Back to selected cell** restores the table and row, including an expanded row view.
+Empty and whitespace-only strings have visible labels and quoted text; their
+recorded values are unchanged. The reader's reduced-motion choice is retained
+when the operating system's motion setting changes while the file is open.
 
 ## What the file contains
 
@@ -157,6 +162,7 @@ python examples/sales_story.py
 python examples/missing_values.py
 python examples/classroom.py
 python examples/float_precision.py
+python examples/blank_strings.py
 ```
 
 The generated HTML files appear in `examples/generated/`. Every example uses
@@ -164,6 +170,7 @@ synthetic data. See [validation scope](docs/validation.md) for the environments 
 checks performed on the prepared release.
 The floating-point example shows why float32 and float64 keys can both display
 `0.1` yet fail to join, while `0.5` matches exactly in both types.
+The blank-string example shows why `notna()` retains empty strings and spaces.
 
 For a complete notebook example, install the optional notebook tools from the
 source checkout and open [examples/notebook.ipynb](examples/notebook.ipynb):

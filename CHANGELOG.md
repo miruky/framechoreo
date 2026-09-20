@@ -2,6 +2,11 @@
 
 ## 0.1.0 — Unreleased
 
+- Reveal and focus value origins, with a return control that restores the selected scene, row view, and playback hold.
+- Preserve the reader's reduced-motion choice across system preference changes.
+- Distinguish empty/whitespace-only strings from missing values without changing recorded data.
+- Add a blank-string filtering example and regression tests for inspection navigation.
+
 - Preserve native float16/float32 text across snapshots and Python/browser provenance.
 - Show the selected column dtype, with a floating-point join example.
 - Count reachable source inputs before expansion, so reused computed zeros do not exhaust lineage limits.

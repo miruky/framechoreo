@@ -48,6 +48,14 @@
   content: " missing";
   font-size: 10px;
 }
+[data-blank="empty"]::after {
+  content: " empty";
+  font-size: 10px;
+}
+[data-blank="whitespace"]::after {
+  content: " whitespace";
+  font-size: 10px;
+}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #11141a;
@@ -110,7 +118,8 @@ button:disabled {
   cursor: default;
 }
 button:focus-visible,
-select:focus-visible {
+select:focus-visible,
+.inspector:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 3px;
 }
@@ -329,6 +338,12 @@ p {
 .cell[data-type="missing"] {
   color: var(--muted);
 }
+.cell[data-blank] {
+  white-space: pre;
+}
+.origin .value[data-blank] {
+  white-space: pre-wrap;
+}
 .cell:hover {
   background: var(--soft);
 }
@@ -422,6 +437,7 @@ p {
   border-radius: 12px;
   background: var(--paper);
   padding: 16px 20px;
+  scroll-margin-top: 12px;
 }
 .inspector-head {
   font-size: 12px;
@@ -431,6 +447,7 @@ p {
 }
 .inspector-titlebar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
@@ -439,8 +456,10 @@ p {
   margin-bottom: 0;
   min-width: 0;
 }
-.clear-selection {
-  flex-shrink: 0;
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 .inspector .calculation-note {
   padding: 9px 11px;

@@ -58,6 +58,11 @@ retains the remaining hold time. Resuming or changing speed continues from that
 point. Manual scene navigation resets the selected scene's hold time.
 Selecting a value settles the visual transition before inspection, so temporary
 animation rows do not remain beside the recorded result.
+The origins section receives focus and scrolls into view. **Back to selected cell**
+restores the scene, expanded row view, and remaining playback hold saved at selection.
+If the cell was in the right-input preview, its table opens for inspection.
+The reader's reduced-motion choice is kept for the lifetime of the player; the
+system preference always suppresses motion while enabled.
 
 ### Export methods
 
@@ -98,8 +103,10 @@ requires a recorded table.
 selected = frame.filter_rows(lambda df: df["paid"], label="Keep paid orders")
 ```
 
-The predicate is evaluated once on a copy. Mutating that copy is rejected. A
-boolean Series, boolean sequence, or boolean array may also be passed directly.
+The predicate is evaluated once on a copy. Changes to its cells, axes, dtypes, or
+duplicate-label policy are rejected. The `attrs` dictionary is copied but is not
+checked for mutation; it is outside the displayed data and provenance contract.
+A boolean Series, boolean sequence, or boolean array may also be passed directly.
 Series indices must equal the table index in the same order; other masks use row
 positions. A nullable boolean mask treats missing entries as false, like pandas.
 Integers or strings are not coerced into booleans.
@@ -162,6 +169,12 @@ from empty value inputs with `min_count=0`. For integer sums it can compare reco
 inputs using exact integer addition and flag a possible dtype overflow. These
 focused diagnostics preserve the recorded pandas value and are not a general
 verification of arbitrary calculations.
+
+For text cells, the player distinguishes empty strings and whitespace-only strings
+with a small label. These values use JSON-style quoting in the table and inspector,
+so tabs and newlines are visible. The displayed type description distinguishes an
+empty string from a string containing literal quote marks. Exported cell values,
+`to_pandas()`, and `CellOrigin.value` retain the original text.
 
 ### to_pandas and explain
 
