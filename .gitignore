@@ -11,3 +11,4 @@ build/
 *.egg-info/
 examples/generated/
 .DS_Store
+node_modules/

@@ -10,6 +10,7 @@ def no_network(monkeypatch):
         raise AssertionError("Tests must not use the network")
 
     monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked)
     monkeypatch.setattr(socket, "create_connection", blocked)
 
 

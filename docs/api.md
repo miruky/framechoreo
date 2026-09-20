@@ -20,9 +20,14 @@ frame = story.table(df, name="Sales")
 
 Copies the DataFrame and records it as a source. Supported cells are strings,
 booleans, real integer/float scalars, missing values, Decimal, date/time values,
-and durations. Mutable nested objects and unsupported types are rejected. Columns
+and durations. NumPy timedelta scalars are encoded as durations; their `NaT` and
+Decimal NaNs are missing values. NumPy floating scalars use their native text
+formatting. Mutable nested objects and unsupported types are rejected. Columns
 must have unique, nonempty string names. The original index is preserved internally
 but is not automatically published as a displayed column.
+
+Axis buffers and categorical dictionaries are detached as well as ordinary data.
+Unpaired Unicode surrogates are rejected during capture, before a snapshot is added.
 
 ### annotate
 
@@ -35,6 +40,10 @@ Replaces the presentation settings for that step. `note` is at most 600 characte
 or a sequence of column names. Neither data nor lineage is recalculated. A grouped
 sum creates grouping and summing scenes, both using the step's hold time. The note
 appears only in the summing scene, once the result exists.
+
+Playback first holds the current scene. Pause freezes active row animations and
+retains the remaining hold time. Resuming or changing speed continues from that
+point. Manual scene navigation resets the selected scene's hold time.
 
 ### Export methods
 
@@ -59,6 +68,8 @@ File writing uses a temporary file in the destination directory. Existing files
 are protected by an exclusive hard link when `overwrite=False`; overwrite mode uses
 `os.replace`. Filesystems that do not support these operations may raise `OSError`.
 There is no unsafe fallback that overwrites an existing file silently.
+`overwrite` must be an actual boolean; the string `"false"` is rejected.
+JSON is encoded incrementally and stops once its byte limit is exceeded.
 
 In Jupyter, `_repr_html_()` embeds the same player in a sandboxed `srcdoc` iframe.
 Notebook trust and the host's iframe policy can affect rendering.
@@ -76,6 +87,9 @@ boolean Series, boolean sequence, or boolean array may also be passed directly.
 Series indices must equal the table index in the same order; other masks use row
 positions. A nullable boolean mask treats missing entries as false, like pandas.
 Integers or strings are not coerced into booleans.
+Scalar booleans, dictionaries, and unordered sets are rejected. Missing mask values
+require a nullable boolean dtype. Input comparison is exact, including small
+floating-point changes.
 
 This tracks retained rows. It does not infer every input cell accessed inside an
 arbitrary predicate. External side effects of a user callback are the caller's
@@ -139,7 +153,10 @@ and `value`. The player's visible row numbers start at one.
 Repeated use of a source cell is preserved in the tuple. Empty lineage does not
 guess a match from equal values. A bounded traversal raises `CaptureLimitError`
 when there are too many source inputs. The browser shows up to 50 origin buttons
-and reports when additional origins are not displayed.
+per page, with controls to visit every recorded origin. Inspecting an origin reveals
+and focuses its source cell. Right-hand join inputs can be opened in full; an
+intermediate right input is identified as an input rather than as an original source.
+Duplicate source names receive distinct display labels without changing source IDs.
 
 ## Errors
 

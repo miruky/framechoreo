@@ -28,6 +28,9 @@ Or install the prepared wheel:
 python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 ```
 
+If you installed an earlier unreleased wheel with the same version, add
+`--force-reinstall --no-deps` to replace that local installation.
+
 Runtime dependencies are pandas and NumPy. A browser runs the exported player;
 Node.js is only needed for the player-model development tests.
 
@@ -103,6 +106,9 @@ The default limits are **200 rows per step, 12 columns, 20 steps, and 2 MB of
 serialized story data**. These are capture guards, not a benchmark. Limits raise
 errors rather than sample silently. The player initially shows up to 12 rows;
 **Show all** reveals the remaining recorded rows. Calculations use all captured rows.
+Origin lists are paginated in groups of 50, and the complete right-hand join input
+can be inspected. Pause freezes row motion and keeps the remaining scene time;
+resuming and changing speed preserve progress.
 
 ## What the file contains
 
@@ -126,6 +132,9 @@ embedded and displayed as text. Input callbacks are trusted Python code, not a s
 - Nested objects, bytes, complex numbers, duplicate columns, and non-string column
   names are rejected. DataFrame index labels are preserved by `to_pandas()` but
   are not exported as display columns; source positions identify rows.
+- Scalar or dictionary filter masks are rejected; supply one boolean per row.
+  Text must be valid Unicode for UTF-8 export. Missing values carry a visible
+  marker, and selecting a cell reveals its encoded value type.
 - A filter records which rows remain, not every cell read by arbitrary Python code.
   Sum explanations omit missing numeric inputs; group membership and `min_count`
   remain in the operation record.

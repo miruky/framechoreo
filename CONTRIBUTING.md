@@ -11,8 +11,11 @@ browser-independent player tests.
 
 ```sh
 python -m pip install -e ".[dev]"
+npm ci
 python -m pytest
-node --test tests/player-model.test.cjs
+npm test
+npm run format:check
+python tests/check_wire.py
 python -m ruff check .
 python -m ruff format --check .
 ```
@@ -33,7 +36,10 @@ clear contract for value inputs and row membership.
 
 ## Player changes
 
-Run the Node model tests and generate the examples. Inspect normal playback,
+Run the Node model and DOM tests and generate the examples. DOM tests use jsdom
+with a controlled clock; they test actual player controls, not real browser layout.
+`check_wire.py` compares Python and JavaScript source-cell traversal. Keep JavaScript
+and CSS formatted with `npm run format`. Inspect normal playback,
 backward navigation, source-cell inspection, empty output, narrow screens, and
 reduced motion. Cell text must never be inserted as executable HTML. Keep the
 export free of external requests.
@@ -43,11 +49,17 @@ export free of external requests.
 ```sh
 python -m build
 python -m twine check dist/*
+python tests/check_distribution.py
 ```
 
 Install the wheel in a fresh environment outside the source checkout and run an
 example. The wheel must include CSS, JavaScript, and `py.typed`. The sdist must
 include tests, examples, documentation, and the license.
+
+The distribution checker expects one wheel and one sdist in `dist/`. It checks
+archive contents against the source, creates a separate virtual environment,
+installs the wheel and runtime dependencies, then runs the README example with
+runtime connections blocked. Dependency installation itself needs package access.
 
 Keep local caches, private datasets, generated research notes, and credentials out
 of patches. Describe verification honestly and distinguish checks you ran from

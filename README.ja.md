@@ -25,6 +25,9 @@ python examples/sales_story.py
 python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 ```
 
+同じ版番号の未公開wheelを以前に導入している場合は、上のコマンドに
+`--force-reinstall --no-deps` を追加して入れ替えてください。
+
 `examples/generated/sales.html` をブラウザーで開くと、実際のPython処理から
 生成した説明が再生できます。`classroom.py` は日本語の題材です。
 完全なコード例は[英語README](README.md#a-complete-story)にあります。
@@ -35,6 +38,11 @@ python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 `filter_rows()`、`merge()`、`group_sum()` を実行します。
 `to_pandas()` は記録した結果のコピー、`explain(行位置, 列名)` は元の値の一覧を返します。
 行位置は0から数えます。画面では読みやすく1から表示します。
+
+一時停止は行の動きと再生時間を止め、再開・速度変更でも途中の位置を保ちます。
+元の入力が多い場合は50件ずつページを送り、すべて確認できます。
+結合相手の表も全行を開けます。元のセルへ移動すると、そのセルまで画面が移り、
+キーボードの操作位置も引き継ぎます。欠損には表示を添え、文字列の「∅」と区別します。
 
 説明の注記・再生時の間・強調する列は、計算と分けて指定できます。
 
@@ -55,6 +63,8 @@ story.export_html("story.html", result=total, overwrite=True)
 - 既定の記録上限は1工程200行・12列、全20工程、JSONデータ2 MBです。
 - プレイヤーは最初の12行を表示し、全記録を表示する操作も用意しています。
 - 対応外のデータ・操作や上限超過を、黙って省略・推定することはありません。
+- フィルターには1行につき一つの真偽値を渡します。単独の真偽値や辞書は受け付けません。
+- 行名・列名・カテゴリのラベルもコピーし、入力の変更から記録を保護します。
 
 Polars、pivot、melt、多対多結合、任意の集計、GIF/MP4出力は未対応です。
 DataFrameのindexを行の識別子に使わないため、重複したindexも区別します。

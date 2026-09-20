@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .encoding import encode_cell
+from .encoding import encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 
 VERSION = "0.1.0"
@@ -59,15 +59,47 @@ class _Step:
 def _text(value: str, name: str, limit: int = 400) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(f"{name} must be a nonempty string of at most {limit} characters")
-    return value
+    return validate_text(value)
 
 
-def _keys(value: str | Sequence[str], columns: pd.Index) -> list[str]:
-    result = [value] if isinstance(value, str) else list(value)
-    if not result or any(not isinstance(x, str) for x in result):
+def _keys(value: str | Sequence[str], columns: pd.Index, *, allow_empty: bool = False) -> list[str]:
+    try:
+        if isinstance(value, (Mapping, Set)):
+            raise TypeError
+        result = [value] if isinstance(value, str) else list(value)
+    except TypeError as exc:
+        raise ValueError("Keys must be a column name or an ordered sequence of names") from exc
+    if (not result and not allow_empty) or any(not isinstance(x, str) for x in result):
         raise ValueError("Keys must be nonempty column names")
     if len(set(result)) != len(result) or any(x not in columns for x in result):
         raise ValueError("Keys must be unique and present in the table")
+    return result
+
+
+def _copy_index(index: pd.Index) -> pd.Index:
+    if isinstance(index, pd.MultiIndex):
+        return index.copy(deep=True).set_levels(
+            [_copy_index(level) for level in index.levels], verify_integrity=False
+        )
+    if isinstance(index, pd.CategoricalIndex):
+        return pd.CategoricalIndex(_copy_categorical(index.array), name=index.name)
+    return index.copy(deep=True)
+
+
+def _copy_categorical(values: pd.Categorical) -> pd.Categorical:
+    return pd.Categorical.from_codes(
+        values.codes.copy(), categories=_copy_index(values.categories), ordered=values.ordered
+    )
+
+
+def _detached_copy(frame: pd.DataFrame) -> pd.DataFrame:
+    """Detach axes and categorical dictionaries that pandas deep copies can share."""
+    result = frame.copy(deep=True)
+    result.index = _copy_index(frame.index)
+    result.columns = _copy_index(frame.columns)
+    for position, dtype in enumerate(frame.dtypes):
+        if isinstance(dtype, pd.CategoricalDtype):
+            result.isetitem(position, _copy_categorical(frame.iloc[:, position].array))
     return result
 
 
@@ -131,6 +163,8 @@ class DataStory:
             raise UnsupportedDataError("Columns must have unique, nonempty string names")
         if len(frame.columns) == 0:
             raise UnsupportedDataError("At least one column is required")
+        for column in frame.columns:
+            validate_text(column)
         for values in frame.itertuples(index=False, name=None):
             for value in values:
                 encode_cell(value)
@@ -139,7 +173,7 @@ class DataStory:
             name=_text(name, "name", 100),
             operation=operation,
             label=_text(label, "label"),
-            frame=frame.copy(deep=True),
+            frame=_detached_copy(frame),
             parents=parents,
             row_parents=row_parents,
             cell_parents=cell_parents,
@@ -179,11 +213,12 @@ class DataStory:
         sid = self._result(frame)
         if not isinstance(note, str) or len(note) > 600:
             raise ValueError("note must be a string of at most 600 characters")
+        validate_text(note)
         if isinstance(hold, bool) or not isinstance(hold, (int, float)):
             raise ValueError("hold must be between 1 and 30 seconds")
-        if not math.isfinite(hold) or not 1 <= hold <= 30:
+        if not 1 <= hold <= 30 or not math.isfinite(hold):
             raise ValueError("hold must be between 1 and 30 seconds")
-        columns = _keys(highlight, frame._snapshot.frame.columns) if highlight else []
+        columns = _keys(highlight, frame._snapshot.frame.columns, allow_empty=True)
         self._presentations[sid] = {
             "note": note,
             "hold_ms": round(hold * 1000),
@@ -253,10 +288,17 @@ class DataStory:
         }
 
     def to_json(self, *, result: StoryFrame | None = None) -> str:
-        text = json.dumps(self.to_dict(result=result), ensure_ascii=False, allow_nan=False)
-        if len(text.encode("utf-8")) > self.max_export_bytes:
-            raise CaptureLimitError("Recorded data exceeds max_export_bytes; nothing was truncated")
-        return text
+        chunks: list[str] = []
+        size = 0
+        encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False)
+        for chunk in encoder.iterencode(self.to_dict(result=result)):
+            size += len(chunk.encode("utf-8"))
+            if size > self.max_export_bytes:
+                raise CaptureLimitError(
+                    "Recorded data exceeds max_export_bytes; nothing was truncated"
+                )
+            chunks.append(chunk)
+        return "".join(chunks)
 
     def to_html(self, *, result: StoryFrame | None = None, theme: str = "auto") -> str:
         """Return a self-contained player with no external assets or network requests."""
@@ -310,7 +352,7 @@ class StoryFrame:
 
     def to_pandas(self) -> pd.DataFrame:
         """Return a copy, so changes cannot mutate the recorded history."""
-        return self._snapshot.frame.copy(deep=True)
+        return _detached_copy(self._snapshot.frame)
 
     def filter_rows(
         self,
@@ -321,13 +363,15 @@ class StoryFrame:
         df = self.to_pandas()
         mask = predicate(df) if callable(predicate) else predicate
         try:
-            pd.testing.assert_frame_equal(df, self._snapshot.frame)
+            pd.testing.assert_frame_equal(df, self._snapshot.frame, check_exact=True)
         except AssertionError as exc:
             raise ValueError("Filter predicate must not mutate its input") from exc
         if isinstance(mask, pd.Series):
             if not mask.index.equals(df.index):
                 raise ValueError("A Series mask must have the same index and order as the table")
         else:
+            if isinstance(mask, (Mapping, Set)) or pd.api.types.is_scalar(mask):
+                raise ValueError("Expected a one-dimensional boolean mask, not a scalar or mapping")
             try:
                 mask = pd.Series(mask, dtype="boolean" if len(df) == 0 else None)
             except (TypeError, ValueError) as exc:
@@ -365,7 +409,11 @@ class StoryFrame:
             raise ValueError("how must be 'left' or 'inner'")
         if validate not in {"many_to_one", "one_to_one", "m:1", "1:1"}:
             raise ValueError("validate must be 'many_to_one' or 'one_to_one'")
-        if len(suffixes) != 2 or not all(isinstance(s, str) for s in suffixes):
+        if (
+            not isinstance(suffixes, (tuple, list))
+            or len(suffixes) != 2
+            or not all(isinstance(s, str) for s in suffixes)
+        ):
             raise ValueError("suffixes must contain two strings")
         left_df, right_df = self.to_pandas(), right.to_pandas()
         keys = _keys(on, left_df.columns)
@@ -438,7 +486,7 @@ class StoryFrame:
     ) -> StoryFrame:
         df = self.to_pandas()
         keys = _keys(by, df.columns)
-        if value not in df.columns or value in keys:
+        if not isinstance(value, str) or value not in df.columns or value in keys:
             raise ValueError("value must name a column outside the grouping keys")
         if not isinstance(dropna, bool) or not isinstance(sort, bool):
             raise ValueError("dropna and sort must be booleans")

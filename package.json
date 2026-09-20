@@ -2,5 +2,13 @@
   "name": "framechoreo-player-tests",
   "private": true,
   "type": "commonjs",
-  "scripts": {"test": "node --test tests/player-model.test.cjs"}
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "format": "prettier --write \"src/framechoreo/assets/*.{js,css}\" \"tests/*.cjs\" package.json .prettierrc.json",
+    "format:check": "prettier --check \"src/framechoreo/assets/*.{js,css}\" \"tests/*.cjs\" package.json .prettierrc.json"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "prettier": "3.9.8"
+  }
 }

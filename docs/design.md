@@ -10,7 +10,9 @@ browser.
 Each source and transformation is assigned a step ID. A row is identified by its
 step and positional row number, independently of pandas index labels. Data is
 copied on capture and on `to_pandas()`. Scalar-only capture makes the snapshot
-boundary tractable; nested mutable objects are rejected.
+boundary tractable; nested mutable objects are rejected. Axis buffers and
+categorical dictionaries are copied explicitly because a pandas deep copy can
+still share those buffers. Predicate mutation checks compare exact values.
 
 Filter lineage comes from the accepted boolean mask. Merge lineage comes from
 a key-only pandas merge with positional markers. The public result comes from a
@@ -30,7 +32,9 @@ group membership can be read before the values collapse into a result.
 
 The player moves recorded rows with DOM animations. It respects reduced-motion
 preferences, does not autoplay on load, and stops at the last scene. Playback never
-reruns pandas. Visible row limits are disclosed and do not change calculations.
+reruns pandas. Pausing keeps both row motion and remaining scene time; changing
+speed preserves progress. Visible row limits are disclosed and do not change
+calculations. Origin pages and a full right-input view keep recorded data reachable.
 
 ## Serialization
 
@@ -38,6 +42,11 @@ Numbers have typed display encodings. In particular, integers use decimal string
 so values above JavaScript's safe-integer range do not change in the browser.
 Date/time values use ISO representations, and column dtypes are recorded. This is
 a display format, not a general-purpose pandas round-trip serializer.
+
+Capture rejects invalid Unicode before serialization. JSON encoding stops at the
+configured byte limit instead of first constructing an arbitrarily large string.
+The player checks step identities, ancestry, cell references, and group membership
+before rendering. These structural checks do not independently recompute pandas.
 
 Only ancestors of the selected result are exported. All their captured rows travel
 with the file, including filtered rows. The producer must prepare data for sharing.

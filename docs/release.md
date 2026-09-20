@@ -41,7 +41,10 @@ The included workflow runs checks only; no publisher, token, or upload job is co
 
 ```sh
 python -m pytest
-node --test tests/player-model.test.cjs
+npm ci
+npm test
+npm run format:check
+python tests/check_wire.py
 python -m ruff check .
 python -m ruff format --check .
 python examples/sales_story.py
@@ -49,4 +52,5 @@ python examples/missing_values.py
 python examples/classroom.py
 python -m build
 python -m twine check dist/*
+python tests/check_distribution.py
 ```

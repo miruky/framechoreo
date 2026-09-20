@@ -41,6 +41,8 @@ def render_html(data: str, title: str, theme: str) -> str:
 
 
 def write_html(path: str | Path, text: str, *, overwrite: bool) -> Path:
+    if not isinstance(overwrite, bool):
+        raise ValueError("overwrite must be a boolean")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temp_path = None

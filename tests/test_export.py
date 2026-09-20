@@ -53,3 +53,21 @@ def test_export_data_limit():
     s.table(pd.DataFrame({"a": ["x" * 1000]}))
     with pytest.raises(CaptureLimitError):
         s.to_html()
+
+
+def test_failed_replacement_keeps_existing_file_and_removes_temporary_file(tmp_path, monkeypatch):
+    from framechoreo import export
+
+    story = DataStory()
+    story.table(pd.DataFrame({"value": [1]}))
+    target = tmp_path / "existing.html"
+    target.write_text("original bytes")
+
+    def fail(*args):
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(export.os, "replace", fail)
+    with pytest.raises(OSError, match="replacement failure"):
+        story.export_html(target, overwrite=True)
+    assert target.read_text() == "original bytes"
+    assert list(tmp_path.iterdir()) == [target]
