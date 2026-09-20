@@ -1,0 +1,52 @@
+# First release checklist
+
+The local artifacts are prepared separately from publishing. A successful build
+does not mean a GitHub repository or PyPI project already exists.
+
+1. Confirm the project name and inspect the final source diff.
+2. Run Python tests on both supported pandas lines, player-model tests, and lint.
+3. Generate examples and inspect the player in a browser, including a narrow view.
+4. Build wheel and sdist, run `twine check`, and install the wheel outside the checkout.
+5. Check the distributions for assets, license, docs, tests, and accidental private data.
+6. Create the public repository only when publication is authorized. Enable its
+   issue reporting and private vulnerability-reporting features as appropriate.
+7. Run the configured CI on the actual repository before relying on its platform matrix.
+8. Set the release date in CHANGELOG and update installation instructions when a
+   real PyPI release exists. Add verified project URLs to package metadata.
+9. Configure the PyPI project and trusted publishing, or follow PyPI's supported
+   authenticated upload process. Account creation and publisher configuration are separate.
+10. Tag the checked source, publish the matching artifacts, and confirm installation
+    from the published package. Preserve artifact hashes in the release record.
+
+The intended license is MIT. Review the project description and name before public
+registration; a search finding no package is not a name reservation.
+
+## Accounts and registration
+
+Preparing a Python package locally needs no publisher account. For the intended
+public workflow, use a GitHub account for the repository and a PyPI account for
+package uploads. PyPI requires a verified email address; configure two-factor
+authentication and retain recovery codes. See [PyPI account help](https://pypi.org/help/#twofa).
+
+TestPyPI is an optional rehearsal service with a separate account and namespace;
+it does not reserve the production name. See the [packaging tutorial](https://packaging.python.org/en/latest/tutorials/packaging-projects/).
+
+A new project can use a pending Trusted Publisher: it creates the project on its
+first successful upload. Configure the actual repository owner, repository,
+workflow filename, and deployment environment after those exist. See [PyPI's
+new-project guide](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
+The included workflow runs checks only; no publisher, token, or upload job is configured.
+
+## Local verification commands
+
+```sh
+python -m pytest
+node --test tests/player-model.test.cjs
+python -m ruff check .
+python -m ruff format --check .
+python examples/sales_story.py
+python examples/missing_values.py
+python examples/classroom.py
+python -m build
+python -m twine check dist/*
+```

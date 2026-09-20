@@ -1,0 +1,6 @@
+{
+  "name": "framechoreo-player-tests",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {"test": "node --test tests/player-model.test.cjs"}
+}

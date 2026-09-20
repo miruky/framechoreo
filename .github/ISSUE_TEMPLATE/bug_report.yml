@@ -1,0 +1,25 @@
+name: Bug report
+description: A reproducible calculation, lineage, or playback problem
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Explain the expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal synthetic example
+      description: Include a small runnable example. Do not include private data.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Python, pandas, FrameChoreo, OS, and browser if applicable.
+    validations:
+      required: true
