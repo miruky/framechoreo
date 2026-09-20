@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import gzip
 import html
 import os
 import tempfile
@@ -9,20 +11,35 @@ from importlib.resources import files
 from pathlib import Path
 
 
-def render_html(data: str, title: str, theme: str) -> str:
-    if theme not in {"auto", "light", "dark"}:
+def render_html(data: str, title: str, theme: str, *, compression: str = "auto") -> str:
+    if not isinstance(theme, str) or theme not in {"auto", "light", "dark"}:
         raise ValueError("theme must be 'auto', 'light', or 'dark'")
+    if not isinstance(compression, str) or compression not in {"auto", "none", "gzip"}:
+        raise ValueError("compression must be 'auto', 'none', or 'gzip'")
     assets = files("framechoreo").joinpath("assets")
     css = assets.joinpath("player.css").read_text(encoding="utf-8")
     model = assets.joinpath("model.js").read_text(encoding="utf-8")
     player = assets.joinpath("player.js").read_text(encoding="utf-8")
-    safe_data = (
-        data.replace("&", "\\u0026")
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-        .replace("\u2028", "\\u2028")
-        .replace("\u2029", "\\u2029")
-    )
+    safe_data = None
+    encoding = "json"
+    data_type = "application/json"
+    raw = data.encode("utf-8")
+    if compression == "gzip" or (compression == "auto" and len(raw) >= 100_000):
+        compressed = base64.b64encode(gzip.compress(raw, compresslevel=6, mtime=0)).decode("ascii")
+        plain_size = len(raw) + 5 * sum(data.count(c) for c in "&<>")
+        plain_size += 3 * (data.count("\u2028") + data.count("\u2029"))
+        if compression == "gzip" or len(compressed) < plain_size:
+            safe_data = compressed
+            encoding = "gzip-base64"
+            data_type = "application/octet-stream"
+    if safe_data is None:
+        safe_data = (
+            data.replace("&", "\\u0026")
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029")
+        )
     return (
         '<!doctype html>\n<html lang="en" data-theme="' + theme + '">\n<head>\n'
         '<meta charset="utf-8">\n'
@@ -35,7 +52,8 @@ def render_html(data: str, title: str, theme: str) -> str:
         '<main id="framechoreo-player" aria-label="Data transformation story"></main>\n'
         "<noscript>This story needs JavaScript to animate. "
         "No network access is required.</noscript>\n"
-        f'<script id="framechoreo-data" type="application/json">{safe_data}</script>\n'
+        f'<script id="framechoreo-data" type="{data_type}" data-encoding="{encoding}" '
+        f'data-json-bytes="{len(raw)}">{safe_data}</script>\n'
         f"<script>{model}</script>\n<script>{player}</script>\n</body>\n</html>\n"
     )
 

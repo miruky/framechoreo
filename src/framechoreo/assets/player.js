@@ -1,7 +1,48 @@
 /* Standalone player: recorded values only, never evaluates Python or makes requests. */
-(function () {
+(function startPlayer(preparedData) {
   "use strict";
   const root = document.getElementById("framechoreo-player");
+  const dataNode = document.getElementById("framechoreo-data");
+  if (dataNode.dataset.encoding === "gzip-base64" && preparedData === undefined) {
+    root.textContent = "Opening story…";
+    root.setAttribute("aria-busy", "true");
+    (async () => {
+      if (typeof DecompressionStream !== "function")
+        throw new Error("Use a current browser, or ask the author for an uncompressed export.");
+      const expected = Number(dataNode.dataset.jsonBytes);
+      if (!Number.isSafeInteger(expected) || expected < 1) throw new Error("Invalid story size");
+      const bytes = Uint8Array.from(atob(dataNode.textContent), (c) => c.charCodeAt(0));
+      dataNode.textContent = "";
+      const reader = new Blob([bytes])
+        .stream()
+        .pipeThrough(new DecompressionStream("gzip"))
+        .getReader();
+      const decoder = new TextDecoder("utf-8", { fatal: true }),
+        chunks = [];
+      let size = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > expected) {
+          await reader.cancel();
+          throw new Error("Story exceeds its recorded size");
+        }
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+      if (size !== expected) throw new Error("Incomplete compressed story");
+      chunks.push(decoder.decode());
+      const data = JSON.parse(chunks.join(""));
+      root.removeAttribute("aria-busy");
+      root.replaceChildren();
+      startPlayer(data);
+    })().catch((error) => {
+      root.removeAttribute("aria-busy");
+      root.textContent = "Could not open this story: " + error.message;
+      root.dataset.ready = "error";
+    });
+    return;
+  }
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -29,29 +70,40 @@
         ? "whitespace-only string (" + count([...cell.display].length, "character") + ")"
         : cell.type;
   try {
-    const data = JSON.parse(document.getElementById("framechoreo-data").textContent);
+    const data = preparedData === undefined ? JSON.parse(dataNode.textContent) : preparedData;
+    dataNode.textContent = "";
     const model = globalThis.FrameChoreoModel,
       steps = model.indexStory(data),
-      scenes = model.scenes(data);
+      scenes = model.scenes(data, steps);
     const reduced = matchMedia("(prefers-reduced-motion: reduce)");
     const state = {
       index: 0,
       playing: false,
       speed: 1,
       all: false,
+      tablePage: 0,
       selection: null,
       selectionLocation: null,
       inspection: null,
       returnAll: false,
-      originPage: 0,
+      returnPage: 0,
+      originOffset: 0n,
       reduceMotion: false,
     };
     let timer = null,
       deadline = 0,
       remainingHold = null,
       lastKey = null,
+      lastViewportKey = null,
       animationNodes = [],
       rowAnimations = [];
+    const orderedCache = new Map(),
+      groupMapCache = new Map();
+    function orderedRows(scene) {
+      const key = scene.step.id + ":" + scene.kind;
+      if (!orderedCache.has(key)) orderedCache.set(key, model.orderedRows(scene));
+      return orderedCache.get(key);
+    }
     const brand = el("div", "brand", "FRAMECHOREO");
     const title = el("h1", "", data.title);
     root.append(brand, title);
@@ -99,6 +151,10 @@
         merge: "Join",
         group: "Group",
         sum: "Sum",
+        sort: "Sort",
+        select: "Columns",
+        rename: "Rename",
+        calculate: "Calculate",
       };
       const b = button(i + 1 + " · " + (names[scene.kind] || scene.kind), () => go(i), "chapter");
       nav.append(b);
@@ -128,6 +184,7 @@
       () => {
         state.inspection = null;
         state.all = state.returnAll;
+        state.tablePage = state.returnPage;
         lastKey = null;
         render();
         reveal(caption);
@@ -171,7 +228,7 @@
         const target = board.querySelector(".cell.selected") || caption;
         state.selection = null;
         state.selectionLocation = null;
-        state.originPage = 0;
+        state.originOffset = 0n;
         inspectorHead.textContent = "SELECT A VALUE";
         selectedValue.textContent = "Select any cell to trace its value inputs.";
         selectedType.textContent = "";
@@ -211,7 +268,7 @@
       el(
         "p",
         "",
-        "This file includes all recorded ancestor tables, including filtered-out rows. Display limits do not remove data. Review source tables before sharing. Playback uses recorded results and makes no network requests.",
+        "This file includes all recorded ancestor tables, including filtered-out rows and removed columns. Compression and display limits do not remove data. Review source tables before sharing. Playback uses recorded results and makes no network requests.",
       ),
     );
     root.append(
@@ -266,6 +323,7 @@
       if (state.inspection) {
         state.inspection = null;
         state.all = state.returnAll;
+        state.tablePage = state.returnPage;
         lastKey = null;
         render();
       }
@@ -283,6 +341,7 @@
       state.index = Math.max(0, Math.min(scenes.length - 1, index));
       state.inspection = null;
       state.all = false;
+      state.tablePage = 0;
       render();
     }
     function activeScene() {
@@ -294,7 +353,12 @@
     }
     function isSelected(step, row, column) {
       if (!state.selection) return false;
-      return state.selection.keys.has(model.cellKey(step, row, column));
+      return (
+        (state.selection.step === step &&
+          state.selection.row === row &&
+          state.selection.column === column) ||
+        state.selection.trace.hasSource(step, row, column)
+      );
     }
     function selectCell(step, row, column) {
       stop();
@@ -309,10 +373,12 @@
         index: state.index,
         inspection: state.inspection,
         all: state.all,
+        tablePage: state.tablePage,
         returnAll: state.returnAll,
+        returnPage: state.returnPage,
         remainingHold,
       };
-      state.originPage = 0;
+      state.originOffset = 0n;
       inspectorHead.textContent =
         model.tableLabel(data, tableData) + " · row " + (row + 1) + " · " + column;
       selectedValue.textContent = displayValue(cell);
@@ -324,17 +390,14 @@
       origins.replaceChildren();
       originPager.replaceChildren();
       try {
-        const inputs = model.traceCell(data, { step, row, column });
-        const keys = new Set(
-          inputs.map((input) => model.cellKey(input.step, input.row, input.column)),
-        );
-        keys.add(model.cellKey(step, row, column));
-        state.selection = { step, row, column, origins: inputs, keys };
+        const trace = model.prepareTrace(data, { step, row, column }, steps);
+        state.selection = { step, row, column, trace };
         renderOrigins();
         const details = model.cellExplanation(steps, { step, row, column });
-        const instructions = inputs.length
-          ? "Select an input above to inspect its source table. Repeated inputs are retained."
-          : "No raw source value inputs were recorded for this cell.";
+        const instructions =
+          trace.total > 0n
+            ? "Select an input above to inspect its source table. Repeated inputs are retained."
+            : "No raw source value inputs were recorded for this cell.";
         explanation.textContent = details.text ? details.text + " " + instructions : instructions;
         explanation.classList.toggle("calculation-note", Boolean(details.warning));
       } catch (error) {
@@ -356,6 +419,11 @@
           b.dataset.column === target.column,
       );
     }
+    function revealCell(target) {
+      const input = limitInfo.querySelector('[data-action="row-number"]');
+      if (input) input.value = String(target.row + 1);
+      reveal(findBoardCell(target) || caption);
+    }
     function returnToSelection() {
       const target = state.selectionLocation;
       if (!target) return;
@@ -363,7 +431,9 @@
       state.index = target.index;
       state.inspection = target.inspection;
       state.all = target.all;
+      state.tablePage = target.tablePage;
       state.returnAll = target.returnAll;
+      state.returnPage = target.returnPage;
       remainingHold = target.remainingHold;
       if (activeScene().table.id !== target.step) {
         inspectStep(target.step, target);
@@ -371,26 +441,33 @@
       }
       lastKey = null;
       render();
-      reveal(findBoardCell(target) || caption);
+      revealCell(target);
     }
     function inspectStep(step, target = null, all = false) {
       stop();
-      if (!state.inspection) state.returnAll = state.all;
+      if (!state.inspection) {
+        state.returnAll = state.all;
+        state.returnPage = state.tablePage;
+      }
       state.inspection = step;
       state.all = all || (target !== null && target.row >= 12);
+      state.tablePage = target ? Math.floor(target.row / 100) : 0;
       lastKey = null;
       render();
-      const cell = target && findBoardCell(target);
-      reveal(cell || caption);
+      if (target) revealCell(target);
+      else reveal(caption);
     }
     function renderOrigins() {
-      const inputs = state.selection.origins;
-      const offset = state.originPage * 50;
+      const trace = state.selection.trace,
+        page = trace.page(state.originOffset, 50),
+        inputs = page.origins,
+        offset = state.originOffset,
+        total = trace.total;
       origins.replaceChildren();
       originPager.replaceChildren();
-      for (const origin of inputs.slice(offset, offset + 50)) {
-        const b = button("", () => inspectStep(origin.step, origin), "origin");
-        const value = el("span", "value", displayValue(origin.cell));
+      for (const origin of inputs) {
+        const b = button("", () => inspectStep(origin.step, origin), "origin"),
+          value = el("span", "value", displayValue(origin.cell));
         if (blankKind(origin.cell)) value.dataset.blank = blankKind(origin.cell);
         b.title = "Type: " + typeDescription(origin.cell);
         b.append(
@@ -407,36 +484,72 @@
         );
         origins.append(b);
       }
-      if (inputs.length <= 50) return;
+      origins.scrollTop = 0;
+      if (total <= 50n) return;
       const change = (delta, action) => {
-        state.originPage += delta;
+        state.originOffset += delta;
         renderOrigins();
         const control = originPager.querySelector('[data-action="' + action + '"]');
         (control.disabled ? origins.firstElementChild : control).focus();
       };
       const previous = button(
-        "← Previous inputs",
-        () => change(-1, "origins-previous"),
-        "text-button",
-      );
-      const next = button("Next inputs →", () => change(1, "origins-next"), "text-button");
+          "← Previous inputs",
+          () => change(-50n, "origins-previous"),
+          "text-button",
+        ),
+        next = button("Next inputs →", () => change(50n, "origins-next"), "text-button");
       previous.dataset.action = "origins-previous";
       next.dataset.action = "origins-next";
-      previous.disabled = state.originPage === 0;
-      next.disabled = offset + 50 >= inputs.length;
+      previous.disabled = offset === 0n;
+      next.disabled = !page.has_next;
       const status = el(
         "span",
         "",
-        offset +
-          1 +
-          "–" +
-          Math.min(offset + 50, inputs.length) +
-          " of " +
-          inputs.length +
-          " value inputs",
+        offset + 1n + "–" + (offset + BigInt(inputs.length)) + " of " + total + " value inputs",
       );
       status.setAttribute("aria-live", "polite");
       originPager.append(previous, status, next);
+      if (total > 200n) {
+        const form = el("form", "jump-form"),
+          label = el("label", "", "Input number "),
+          number = el("input"),
+          message = el("span", "jump-message");
+        number.type = "text";
+        number.inputMode = "numeric";
+        number.maxLength = 100;
+        number.value = String(offset + 1n);
+        number.dataset.action = "origin-number";
+        label.append(number);
+        message.setAttribute("role", "status");
+        const jump = button(
+          "Go to input",
+          () => {
+            if (
+              !/^[1-9][0-9]*$/.test(number.value) ||
+              number.value.length > 100 ||
+              BigInt(number.value) > total
+            ) {
+              message.textContent = "Enter an input number from 1 to " + total + ".";
+              return;
+            }
+            const position = BigInt(number.value) - 1n;
+            state.originOffset = (position / 50n) * 50n;
+            renderOrigins();
+            originPager.querySelector('[data-action="origin-number"]').value = String(
+              position + 1n,
+            );
+            reveal(origins.children[Number(position % 50n)]);
+          },
+          "text-button",
+        );
+        jump.dataset.action = "origins-jump";
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          jump.click();
+        });
+        form.append(label, jump, message);
+        originPager.append(form);
+      }
     }
     function refreshSelection() {
       root.querySelectorAll("button[data-step]").forEach((b) => {
@@ -533,11 +646,14 @@
         positions = new Map();
       let y = 0,
         lastGroup = null;
-      const groupMap = new Map();
-      if (scene.kind === "group")
+      let groupMap = groupMapCache.get(scene.step.id);
+      if (scene.kind === "group" && !groupMap) {
+        groupMap = new Map();
         scene.step.parameters.groups.forEach((g, i) =>
           g.input_rows.forEach((r) => groupMap.set(r, i)),
         );
+        groupMapCache.set(scene.step.id, groupMap);
+      }
       for (const row of rows) {
         const group =
           scene.kind === "group"
@@ -574,6 +690,7 @@
         !state.reduceMotion &&
         !reduced.matches &&
         !state.all &&
+        !scroll.classList.contains("paged") &&
         !state.inspection &&
         typeof board.animate === "function";
       root.classList.toggle("reduce-motion", state.reduceMotion || reduced.matches);
@@ -590,8 +707,19 @@
       const oldMap = new Map(oldRows.map((r) => [r.key, r]));
       board.replaceChildren();
       columnHead.replaceChildren();
-      const allRows = model.orderedRows(scene),
-        rows = state.all ? allRows : allRows.slice(0, 12);
+      const allRows = orderedRows(scene),
+        paged = state.all && allRows.length > 200;
+      state.tablePage = Math.min(state.tablePage, Math.max(0, Math.ceil(allRows.length / 100) - 1));
+      const rowOffset = paged ? state.tablePage * 100 : 0,
+        rows = paged
+          ? allRows.slice(rowOffset, rowOffset + 100)
+          : state.all
+            ? allRows
+            : allRows.slice(0, 12);
+      scroll.classList.toggle("paged", state.all);
+      const viewportKey = sceneKey + ":" + state.all + ":" + state.tablePage;
+      if (viewportKey !== lastViewportKey) scroll.scrollTop = 0;
+      lastViewportKey = viewportKey;
       const grid = "46px repeat(" + tableData.columns.length + ", minmax(100px, 1fr))";
       const minWidth = 49 + tableData.columns.length * 100;
       table.style.minWidth = minWidth + "px";
@@ -637,7 +765,7 @@
         node.style.top = entry.y + "px";
         node.style.gridTemplateColumns = grid;
         node.setAttribute("role", "row");
-        node.setAttribute("aria-rowindex", String(rows.indexOf(row) + 2));
+        node.setAttribute("aria-rowindex", String(rowOffset + rows.indexOf(row) + 2));
         if (entry.group !== null && entry.group >= 0)
           node.style.borderLeftColor = "var(--g" + (entry.group % 6) + ")";
         const number = el("div", "row-number", String(row.position + 1));
@@ -746,9 +874,19 @@
         el(
           "span",
           "",
-          rows.length === allRows.length
-            ? "All " + allRows.length + " recorded rows shown"
-            : "Showing " +
+          paged
+            ? "Page " +
+                (state.tablePage + 1) +
+                " of " +
+                Math.ceil(allRows.length / 100) +
+                " · " +
+                rows.length +
+                " of " +
+                allRows.length +
+                " recorded rows shown; calculations use all rows."
+            : rows.length === allRows.length
+              ? "All " + allRows.length + " recorded rows shown"
+              : "Showing " +
                 rows.length +
                 " of " +
                 allRows.length +
@@ -757,10 +895,13 @@
       );
       if (allRows.length > 12) {
         const toggle = button(
-          state.all ? "Show first 12" : "Show all " + allRows.length,
+          state.all
+            ? "Show first 12"
+            : (allRows.length > 200 ? "Browse all " : "Show all ") + allRows.length,
           () => {
             stop();
             state.all = !state.all;
+            state.tablePage = 0;
             lastKey = null;
             render();
           },
@@ -769,6 +910,7 @@
         toggle.dataset.action = "show-rows";
         limitInfo.append(toggle);
       }
+      if (paged) renderRowPager(allRows);
       chapterButtons.forEach((b, i) => {
         if (i === state.index) b.setAttribute("aria-current", "step");
         else b.removeAttribute("aria-current");
@@ -776,11 +918,75 @@
       prev.disabled = state.index === 0;
       next.disabled = state.index === scenes.length - 1;
       refreshSelection();
-      if (focusedAction === "show-rows")
-        limitInfo.querySelector("button")?.focus({ preventScroll: true });
+      if (["show-rows", "rows-previous", "rows-next"].includes(focusedAction)) {
+        const control = limitInfo.querySelector('[data-action="' + focusedAction + '"]');
+        if (control && !control.disabled) control.focus({ preventScroll: true });
+        else caption.focus({ preventScroll: true });
+      }
       lastKey = sceneKey;
     }
+    function renderRowPager(allRows) {
+      const pager = el("div", "table-pager"),
+        move = (delta) => {
+          stop();
+          state.tablePage += delta;
+          lastKey = null;
+          render();
+        };
+      const previous = button("← Previous rows", () => move(-1), "text-button"),
+        next = button("Next rows →", () => move(1), "text-button");
+      previous.dataset.action = "rows-previous";
+      next.dataset.action = "rows-next";
+      previous.disabled = state.tablePage === 0;
+      next.disabled = (state.tablePage + 1) * 100 >= allRows.length;
+      const form = el("form", "jump-form"),
+        label = el("label", "", "Table row number "),
+        number = el("input"),
+        message = el("span", "jump-message");
+      number.type = "number";
+      number.min = "1";
+      number.max = String(allRows.length);
+      number.step = "1";
+      number.value = String(allRows[state.tablePage * 100].position + 1);
+      number.dataset.action = "row-number";
+      label.append(number);
+      message.setAttribute("role", "status");
+      const jump = button(
+        "Go to row",
+        () => {
+          const row = Number(number.value) - 1;
+          if (
+            !Number.isSafeInteger(row) ||
+            row < 0 ||
+            row >= allRows.length ||
+            !number.value.trim()
+          ) {
+            message.textContent = "Enter a table row number from 1 to " + allRows.length + ".";
+            return;
+          }
+          stop();
+          state.tablePage = Math.floor(allRows.findIndex((r) => r.position === row) / 100);
+          lastKey = null;
+          render();
+          revealCell({
+            step: activeScene().table.id,
+            row,
+            column: activeScene().table.columns[0],
+          });
+        },
+        "text-button",
+      );
+      jump.dataset.action = "rows-jump";
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        jump.click();
+      });
+      form.append(label, jump, message);
+      pager.append(previous, next, form);
+      limitInfo.append(pager);
+    }
     render();
+    root.dataset.ready = "true";
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) stop();
     });
@@ -793,5 +999,6 @@
     });
   } catch (error) {
     root.replaceChildren(el("div", "error", "Could not load this story: " + error.message));
+    root.dataset.ready = "error";
   }
 })();

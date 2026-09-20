@@ -52,6 +52,7 @@ python examples/missing_values.py
 python examples/classroom.py
 python examples/float_precision.py
 python examples/blank_strings.py
+python examples/large_analysis.py --rows 2000
 python -m build
 python -m twine check dist/*
 python tests/check_distribution.py

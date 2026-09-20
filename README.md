@@ -9,7 +9,7 @@ is needed to replay it.
 
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
-FrameChoreo is an early, deliberately small library for teachers, technical writers,
+FrameChoreo is an early library for teachers, technical writers,
 and developers explaining a data transformation. It does not trace arbitrary pandas
 code or replace a production data-lineage platform.
 
@@ -98,14 +98,19 @@ iframe through `_repr_html_()`.
 | `filter_rows(predicate)` | Evaluates a callable once on a copy, or accepts a boolean mask; rejects input mutation and ambiguous Series alignment |
 | `merge(right, on=...)` | Explicit keys, inner/left joins, one-to-one or many-to-one validation; uses pandas null-key behavior |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
+| `calculate(name, left=..., op=..., right=...)` | Row-wise add/subtract/multiply/divide with a numeric column or scalar; records actual operands |
+| `sort_values(by, ...)` | Stable sorting with retained positional provenance |
+| `select_columns([...])` / `rename_columns({...})` | Choose, reorder, and rename columns while retaining their inputs |
 | `annotate(frame, ...)` | Adds a note, playback hold time, and highlighted columns without changing calculations |
 | `explain(row, column)` | Returns source value inputs, preserving repeated use of the same source cell |
+| `explain_page(row, column, offset=..., limit=...)` | Bounded pages with exact totals, including repeated use of an aggregate |
 | `to_html` / `export_html` | Self-contained player; light, dark, or automatic theme |
 
 The default limits are **200 rows per step, 12 columns, 20 steps, and 2 MB of
 serialized story data**. These are capture guards, not a benchmark. Limits raise
 errors rather than sample silently. The player initially shows up to 12 rows;
-**Show all** reveals the remaining recorded rows. Calculations use all captured rows.
+**Show all** reveals small tables; tables over 200 rows use **Browse all**, 100-row
+pages, and a row-number jump. Calculations use all captured rows.
 Origin lists are paginated in groups of 50, and the complete right-hand join input
 can be inspected. Pause freezes row motion and keeps the remaining scene time;
 resuming and changing speed preserve progress.
@@ -120,10 +125,28 @@ Empty and whitespace-only strings have visible labels and quoted text; their
 recorded values are unchanged. The reader's reduced-motion choice is retained
 when the operating system's motion setting changes while the file is open.
 
+## Larger analysis walkthroughs
+
+Use `DataStory.for_analysis()` to opt into a larger capture budget: 50,000 rows per
+step, 24 columns, 50 steps, 2 million cells across all snapshots, and 128 MB of JSON.
+These budgets apply together; they are not a guarantee that every combination fits
+every device. No data is silently sampled.
+
+The player renders large tables in 100-row pages and source uses in 50-input pages.
+Both have direct number jumps. Source totals retain exact repeated-use counts even
+when they exceed JavaScript's ordinary integer range. HTML compression is automatic
+for larger payloads and uses the browser's built-in gzip support; use
+`compression="none"` for an uncompressed export.
+
+Run `python examples/large_analysis.py --rows 50000` for a complete calculation,
+filter, join, aggregation, ranking, column selection, and renaming example.
+See [analysis and scale](docs/analysis.md) for the API, measurements, and memory limits.
+
 ## What the file contains
 
 **An exported story includes its ancestor source tables, including filtered-out
-rows.** Hiding a row in the player does not remove it from the HTML. Use synthetic
+rows and columns removed by selection.** Paging and compression do not remove data
+from the file. Use synthetic
 or appropriately prepared data when sharing examples. `story.export_info()` shows
 the source names, snapshot row count, and serialized size before writing.
 
@@ -163,6 +186,7 @@ python examples/missing_values.py
 python examples/classroom.py
 python examples/float_precision.py
 python examples/blank_strings.py
+python examples/large_analysis.py --rows 5000
 ```
 
 The generated HTML files appear in `examples/generated/`. Every example uses

@@ -29,7 +29,16 @@
     if (!Array.isArray(data.steps) || !Array.isArray(data.timeline))
       invalid("missing steps or timeline");
     const steps = new Map();
-    const parentCounts = { source: 0, filter: 1, merge: 2, group_sum: 1 };
+    const parentCounts = {
+      source: 0,
+      filter: 1,
+      merge: 2,
+      group_sum: 1,
+      sort: 1,
+      select: 1,
+      rename: 1,
+      calculate: 1,
+    };
     for (const step of data.steps) {
       if (!step || typeof step.id !== "string" || !step.id || steps.has(step.id))
         invalid("duplicate or missing step ID");
@@ -95,6 +104,109 @@
       });
       const p = step.parameters;
       if (!p || typeof p !== "object" || Array.isArray(p)) invalid("missing operation settings");
+      if (["sort", "select", "rename", "calculate"].includes(step.operation)) {
+        const parent = steps.get(step.parents[0]);
+        if (step.rows.length !== parent.rows.length) invalid("inconsistent analysis row count");
+        let expectedColumns = parent.columns,
+          positions = null;
+        const columnInputs = new Map(parent.columns.map((column) => [column, [column]]));
+        if (step.operation === "sort") {
+          if (
+            !Array.isArray(p.by) ||
+            !p.by.length ||
+            new Set(p.by).size !== p.by.length ||
+            p.by.some((c) => !parent.columns.includes(c)) ||
+            !(
+              typeof p.ascending === "boolean" ||
+              (Array.isArray(p.ascending) &&
+                p.ascending.length === p.by.length &&
+                p.ascending.every((v) => typeof v === "boolean"))
+            ) ||
+            !["first", "last"].includes(p.na_position) ||
+            !Array.isArray(p.positions) ||
+            p.positions.length !== parent.rows.length ||
+            new Set(p.positions).size !== parent.rows.length ||
+            p.positions.some((i) => !Number.isSafeInteger(i) || i < 0 || i >= parent.rows.length)
+          )
+            invalid("invalid sort settings");
+          positions = p.positions;
+        }
+        if (step.operation === "select") {
+          if (
+            !Array.isArray(p.columns) ||
+            !p.columns.length ||
+            p.columns.some((c) => !parent.columns.includes(c))
+          )
+            invalid("invalid selected columns");
+          expectedColumns = p.columns;
+        }
+        if (step.operation === "rename") {
+          if (
+            !p.mapping ||
+            typeof p.mapping !== "object" ||
+            Array.isArray(p.mapping) ||
+            Object.entries(p.mapping).some(
+              ([k, v]) => !parent.columns.includes(k) || typeof v !== "string" || !v.trim(),
+            )
+          )
+            invalid("invalid renamed columns");
+          expectedColumns = parent.columns.map((c) =>
+            Object.prototype.hasOwnProperty.call(p.mapping, c) ? p.mapping[c] : c,
+          );
+          columnInputs.clear();
+          expectedColumns.forEach((c, i) => columnInputs.set(c, [parent.columns[i]]));
+        }
+        if (step.operation === "calculate") {
+          if (
+            typeof p.name !== "string" ||
+            !p.name.trim() ||
+            parent.columns.includes(p.name) ||
+            !parent.columns.includes(p.left) ||
+            !["add", "subtract", "multiply", "divide"].includes(p.op) ||
+            !p.right ||
+            typeof p.right !== "object" ||
+            Array.isArray(p.right)
+          )
+            invalid("invalid calculation");
+          const isColumn = Object.prototype.hasOwnProperty.call(p.right, "column"),
+            isConstant = Object.prototype.hasOwnProperty.call(p.right, "constant");
+          if (
+            isColumn === isConstant ||
+            (isColumn && !parent.columns.includes(p.right.column)) ||
+            (isConstant &&
+              (!validCell(p.right.constant) ||
+                !["integer", "float", "missing"].includes(p.right.constant.type)))
+          )
+            invalid("invalid calculation operand");
+          expectedColumns = [...parent.columns, p.name];
+          columnInputs.set(p.name, [p.left, ...(isColumn ? [p.right.column] : [])]);
+        }
+        if (
+          expectedColumns.length !== step.columns.length ||
+          expectedColumns.some((c, i) => c !== step.columns[i])
+        )
+          invalid("inconsistent analysis columns");
+        step.rows.forEach((row, i) => {
+          const position = positions ? positions[i] : i;
+          if (
+            row.parents.length !== 1 ||
+            row.parents[0].step !== parent.id ||
+            row.parents[0].row !== position
+          )
+            invalid("inconsistent analysis row reference");
+          for (const column of step.columns) {
+            const expected = columnInputs.get(column),
+              refs = row.cell_parents[column];
+            if (
+              refs.length !== expected.length ||
+              refs.some(
+                (r, j) => r.step !== parent.id || r.row !== position || r.column !== expected[j],
+              )
+            )
+              invalid("inconsistent analysis value references");
+          }
+        });
+      }
       if (step.operation === "filter") {
         const parent = steps.get(step.parents[0]);
         if (
@@ -199,8 +311,8 @@
       invalid("result does not match the primary timeline");
     return steps;
   }
-  function scenes(data) {
-    const steps = indexStory(data),
+  function scenes(data, preparedIndex = null) {
+    const steps = preparedIndex || indexStory(data),
       result = [];
     for (const id of data.timeline) {
       const step = steps.get(id);
@@ -213,12 +325,8 @@
     }
     return result;
   }
-  function traceCell(data, reference, limit = 10000) {
-    if (!Number.isSafeInteger(limit) || limit < 1)
-      throw new Error("The source limit must be a finite positive integer");
-    const steps = indexStory(data),
-      pending = [reference],
-      result = [];
+  function prepareTrace(data, reference, preparedIndex = null) {
+    const steps = preparedIndex || indexStory(data);
     validateReference(steps, reference);
     const counts = new Map(),
       work = [[reference, false]],
@@ -229,43 +337,80 @@
       if (counts.has(key)) continue;
       const step = steps.get(ref.step);
       if (step.operation === "source") {
-        counts.set(key, 1);
+        counts.set(key, 1n);
         continue;
       }
       const refs = step.rows[ref.row].cell_parents[ref.column];
-      if (expanded) {
+      if (expanded)
         counts.set(
           key,
-          refs.reduce((total, parent) => Math.min(limit + 1, total + counts.get(keyOf(parent))), 0),
+          refs.reduce((total, parent) => total + counts.get(keyOf(parent)), 0n),
         );
-      } else {
+      else {
         work.push([ref, true]);
         for (const parent of refs) if (!counts.has(keyOf(parent))) work.push([parent, false]);
       }
     }
-    if (counts.get(keyOf(reference)) > limit)
+    const total = counts.get(keyOf(reference));
+    return {
+      total,
+      hasSource(step, row, column) {
+        return steps.get(step)?.operation === "source" && counts.has(cellKey(step, row, column));
+      },
+      page(offset = 0n, limit = 50) {
+        if (
+          (typeof offset === "number" && (!Number.isSafeInteger(offset) || offset < 0)) ||
+          (typeof offset === "string" && !/^[0-9]+$/.test(offset)) ||
+          !["number", "string", "bigint"].includes(typeof offset)
+        )
+          throw new Error("The input offset must be a nonnegative integer");
+        offset = BigInt(offset);
+        if (offset < 0n || !Number.isSafeInteger(limit) || limit < 1 || limit > 10000)
+          throw new Error("Use a nonnegative offset and a page size from 1 through 10000");
+        const pending = [reference],
+          origins = [];
+        let skip = offset;
+        while (pending.length && origins.length < limit) {
+          const ref = pending.pop(),
+            count = counts.get(keyOf(ref));
+          if (count <= skip) {
+            skip -= count;
+            continue;
+          }
+          const step = steps.get(ref.step),
+            row = step.rows[ref.row];
+          if (step.operation === "source") {
+            origins.push({
+              source: step.name,
+              step: step.id,
+              row: ref.row,
+              column: ref.column,
+              cell: row.cells[step.columns.indexOf(ref.column)],
+            });
+          } else {
+            const refs = row.cell_parents[ref.column];
+            for (let i = refs.length - 1; i >= 0; i--) pending.push(refs[i]);
+          }
+        }
+        return {
+          origins,
+          total: total.toString(),
+          offset: offset.toString(),
+          has_next: offset + BigInt(origins.length) < total,
+        };
+      },
+    };
+  }
+  function traceCell(data, reference, limit = 10000) {
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new Error("The source limit must be a finite positive integer");
+    const trace = prepareTrace(data, reference);
+    if (trace.total > BigInt(limit))
       throw new Error("This value has too many source cells to display.");
-    while (pending.length) {
-      const ref = pending.pop();
-      if (counts.get(keyOf(ref)) === 0) continue;
-      const step = steps.get(ref.step);
-      const row = step && step.rows[ref.row];
-      if (!row || !step.columns.includes(ref.column)) throw new Error("Invalid cell reference");
-      if (step.operation === "source") {
-        result.push({
-          source: step.name,
-          step: step.id,
-          row: ref.row,
-          column: ref.column,
-          cell: row.cells[step.columns.indexOf(ref.column)],
-        });
-      } else {
-        const refs = Object.prototype.hasOwnProperty.call(row.cell_parents, ref.column)
-          ? row.cell_parents[ref.column]
-          : [];
-        for (let i = refs.length - 1; i >= 0; i--) pending.push(refs[i]);
-      }
-    }
+    // Keep the existing complete-list API, including explicitly larger limits.
+    const result = [];
+    for (let offset = 0n; offset < trace.total; offset += 10000n)
+      result.push(...trace.page(offset, 10000).origins);
     return result;
   }
   function rowKey(stepId, position) {
@@ -384,6 +529,36 @@
     const p = scene.step.parameters;
     if (scene.kind === "source") return "Recorded input";
     if (scene.kind === "filter") return "filter_rows(predicate)";
+    if (scene.kind === "sort")
+      return (
+        "sort_values(" +
+        JSON.stringify(p.by) +
+        ", ascending=" +
+        (Array.isArray(p.ascending)
+          ? "[" + p.ascending.map((v) => (v ? "True" : "False")).join(", ") + "]"
+          : p.ascending
+            ? "True"
+            : "False") +
+        ", na_position=" +
+        JSON.stringify(p.na_position) +
+        ', kind="stable")'
+      );
+    if (scene.kind === "select") return "select_columns(" + JSON.stringify(p.columns) + ")";
+    if (scene.kind === "rename") return "rename_columns(" + JSON.stringify(p.mapping) + ")";
+    if (scene.kind === "calculate")
+      return (
+        "calculate(" +
+        JSON.stringify(p.name) +
+        ", left=" +
+        JSON.stringify(p.left) +
+        ", op=" +
+        JSON.stringify(p.op) +
+        ", right=" +
+        (Object.prototype.hasOwnProperty.call(p.right, "column")
+          ? JSON.stringify(p.right.column)
+          : p.right.constant.display) +
+        ")"
+      );
     if (scene.kind === "merge")
       return (
         "merge(on=" +
@@ -417,6 +592,7 @@
     indexStory,
     scenes,
     traceCell,
+    prepareTrace,
     rowKey,
     cellKey,
     cellExplanation,

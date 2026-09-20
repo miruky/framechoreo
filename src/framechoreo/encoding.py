@@ -69,4 +69,5 @@ def encode_cell(value: Any) -> dict[str, Any]:
 
 def cell_signature(value: Any) -> tuple[Any, ...]:
     """Distinguish representations that numeric equality alone treats as equal."""
-    return type(value), encode_cell(value), getattr(value, "fold", None)
+    cell = encode_cell(value)
+    return type(value), cell["type"], cell["value"], cell["display"], getattr(value, "fold", None)

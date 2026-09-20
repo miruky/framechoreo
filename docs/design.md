@@ -59,11 +59,23 @@ The selected column dtype is visible alongside the cell's display type.
 
 Capture rejects invalid Unicode before serialization. JSON encoding stops at the
 configured byte limit instead of first constructing an arbitrarily large string.
+Encoding writes rows incrementally rather than constructing the entire display
+dictionary first. Scalar mutation signatures retain exact values in compact tuples,
+and their comparison streams the second pass. Group membership is collected once,
+rather than scanning every input for each output group.
 The player checks step identities, ancestry, cell references, and group membership
 before rendering. These structural checks do not independently recompute pandas.
 
 Only ancestors of the selected result are exported. All their captured rows travel
-with the file, including filtered rows. The producer must prepare data for sharing.
+with the file, including filtered rows and columns removed by selection. The producer
+must prepare data for sharing. Larger HTML payloads can be gzip/base64 encoded; the
+browser parses them locally and releases the redundant serialized text. No record
+is removed by compression.
+
+The analysis profile adds a cumulative cell budget. Large table views use 100-row
+pages; source-use lists use 50-input pages and counted subtree skipping. The player
+validates and indexes a story at load and reuses that index for inspection. Source
+highlighting uses reachable cells without expanding every repeated source use.
 
 The JSON schema is experimental in 0.x. Self-contained HTML includes the matching
 player and is the primary sharing format. No external font, CDN, telemetry, API
@@ -72,7 +84,7 @@ key, server, or third-party rendering service is used.
 ## Deliberate boundaries
 
 The library does not promise arbitrary code tracing, a semantic explanation of
-user callbacks, many-to-many joins, streaming capture, large-dataset visualization,
+user callbacks, many-to-many joins, streaming or disk-backed capture, unbounded datasets,
 SQL semantics, or mathematical behavior different from pandas. Unsupported
 operations remain unsupported instead of producing guessed provenance.
 

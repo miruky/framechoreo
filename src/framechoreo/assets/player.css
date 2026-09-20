@@ -32,9 +32,42 @@
   color: var(--muted);
   margin-top: 10px;
 }
+.table-pager,
+.jump-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.table-pager,
+.origin-pager .jump-form {
+  width: 100%;
+}
+.jump-form label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.jump-form input {
+  width: 9em;
+  max-width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 7px;
+}
+.jump-message {
+  flex-basis: 100%;
+}
 .origin-pager:empty,
 .value-type:empty {
   display: none;
+}
+.origin-pager > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .value-type {
   color: var(--muted);
@@ -119,6 +152,7 @@ button:disabled {
 }
 button:focus-visible,
 select:focus-visible,
+input:focus-visible,
 .inspector:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 3px;
@@ -270,6 +304,16 @@ p {
 .table-scroll {
   overflow-x: auto;
   padding: 3px 3px 8px;
+}
+.table-scroll.paged {
+  max-height: 560px;
+  overflow: auto;
+}
+.paged .column-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--paper);
 }
 .column-head {
   display: grid;
@@ -483,6 +527,9 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+  max-height: min(360px, 45vh);
+  overflow: auto;
+  padding: 3px 3px 5px;
 }
 .origin {
   display: flex;

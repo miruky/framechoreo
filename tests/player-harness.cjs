@@ -86,15 +86,30 @@ function fixture(count = 3) {
   };
 }
 
-function mount(data = fixture()) {
+function mount(data = fixture(), options = {}) {
+  const serialized = JSON.stringify(data),
+    encoded = options.compressed
+      ? require("node:zlib").gzipSync(serialized).toString("base64")
+      : serialized.replaceAll("<", "\\u003c");
   const dom = new JSDOM(
-    '<!doctype html><main id="framechoreo-player"></main><script id="framechoreo-data" type="application/json">' +
-      JSON.stringify(data).replaceAll("<", "\\u003c") +
+    '<!doctype html><main id="framechoreo-player"></main><script id="framechoreo-data" type="application/json"' +
+      (options.compressed
+        ? ' data-encoding="gzip-base64" data-json-bytes="' +
+          (Buffer.byteLength(serialized) + (options.sizeOffset || 0)) +
+          '"'
+        : "") +
+      ">" +
+      encoded +
       "</script>",
     { runScripts: "outside-only", pretendToBeVisual: true },
   );
   const { window } = dom,
     document = window.document;
+  if (options.compressed) {
+    window.DecompressionStream = options.unsupported ? undefined : globalThis.DecompressionStream;
+    window.Blob = globalThis.Blob;
+    window.TextDecoder = globalThis.TextDecoder;
+  }
   let now = 0,
     nextId = 0;
   const timers = new Map(),
@@ -184,6 +199,25 @@ function mount(data = fixture()) {
     click,
     tick,
     animations,
+    ready: () =>
+      new Promise((resolve, reject) => {
+        if (document.querySelector("main").dataset.ready) {
+          resolve();
+          return;
+        }
+        const observer = new window.MutationObserver(() => {
+          if (document.querySelector("main").dataset.ready) {
+            clearTimeout(timeout);
+            observer.disconnect();
+            resolve();
+          }
+        });
+        const timeout = setTimeout(() => {
+          observer.disconnect();
+          reject(new Error("Player did not finish loading"));
+        }, 5000);
+        observer.observe(document.querySelector("main"), { attributes: true });
+      }),
     scene: () => document.querySelector(".operation")?.textContent,
     close: () => window.close(),
     setReduced: (value) => {

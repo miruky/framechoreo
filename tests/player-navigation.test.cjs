@@ -45,7 +45,7 @@ test("returning from an origin retains a grouping scene instead of changing the 
 test("an inspection error is revealed and still lets the reader return to the cell", (t) => {
   const p = mount();
   t.after(p.close);
-  p.window.FrameChoreoModel.traceCell = () => {
+  p.window.FrameChoreoModel.prepareTrace = () => {
     throw new Error("Too many inputs");
   };
   p.click('.data-row .cell[data-column="v"]');

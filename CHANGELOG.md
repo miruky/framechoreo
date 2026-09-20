@@ -2,6 +2,14 @@
 
 ## 0.1.0 — Unreleased
 
+- Add an opt-in analysis profile with larger row budgets and a cumulative cell limit.
+- Record row-wise numeric calculations, stable sorting, column selection, and renaming.
+- Add exact, bounded provenance pages and direct row/input navigation for larger stories.
+- Bound large table rendering to 100 rows per page and keep expanded tables in a scrolling stage.
+- Stream JSON rows, compact mutation signatures, and collect grouping members in one pass.
+- Add portable gzip HTML with local browser decoding and an uncompressed fallback option.
+- Add a complete 50,000-order analysis example and cross-language paging verification.
+
 - Reveal and focus value origins, with a return control that restores the selected scene, row view, and playback hold.
 - Preserve the reader's reduced-motion choice across system preference changes.
 - Distinguish empty/whitespace-only strings from missing values without changing recorded data.

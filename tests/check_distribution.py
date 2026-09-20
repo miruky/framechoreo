@@ -59,12 +59,16 @@ def main() -> None:
             "tests/test_empty_lineage.py",
             "tests/player-integrity.test.cjs",
             "tests/player-navigation.test.cjs",
+            "tests/player-scale.test.cjs",
+            "tests/test_analysis.py",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
             "examples/notebook.ipynb",
             "examples/float_precision.py",
             "examples/blank_strings.py",
+            "examples/large_analysis.py",
+            "docs/analysis.md",
             "docs/api.md",
             "LICENSE",
         ]:
@@ -88,10 +92,24 @@ assert Path(framechoreo.__file__).resolve().is_relative_to(
 assert framechoreo.__version__ == importlib.metadata.version("framechoreo")
 html = Path("sales-story.html").read_text(encoding="utf-8")
 assert "FrameChoreoModel" in html and "framechoreo-data" in html
+analysis_story = DataStory.for_analysis()
+measurements = analysis_story.table(pd.DataFrame({"key": ["all"] * 1000, "v": range(1, 1001)}))
+analysis_result = (
+    measurements.calculate("double", left="v", op="multiply", right=2)
+    .group_sum(by="key", value="double", dropna=False)
+    .sort_values("double", ascending=False)
+    .select_columns(["key", "double"])
+    .rename_columns({"double": "total"})
+)
+assert analysis_result.to_pandas().iat[0, 1] == 1001000
+last_page = analysis_result.explain_page(0, "total", offset=999)
+assert last_page.total == 1000 and last_page.origins[0].value == 1000
+assert 'data-encoding="gzip-base64"' in analysis_story.to_html(result=analysis_result)
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
     "origins": [int(o.value) for o in total.explain(0,"amount")],
+    "analysis_rows": 1000, "analysis_source_total": last_page.total,
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

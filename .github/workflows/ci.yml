@@ -49,6 +49,7 @@ jobs:
       - run: python examples/classroom.py
       - run: python examples/float_precision.py
       - run: python examples/blank_strings.py
+      - run: python examples/large_analysis.py --rows 2000
       - run: python -m build
       - run: python -m twine check dist/*
       - run: python tests/check_distribution.py

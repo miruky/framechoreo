@@ -81,6 +81,23 @@ def main():
         total = joined.group_sum(by="category", value="v", dropna=False)
         cases.append((story, [source, filled, lookup, joined, total]))
     contracts = []
+    analysis = DataStory()
+    source = analysis.table(
+        pd.DataFrame(
+            {
+                "group": ["a", "b", "a", None],
+                "units": [2, 3, 4, 5],
+                "price": pd.Series([0.1, 0.2, np.nan, 0.4], dtype="float32"),
+            }
+        )
+    )
+    calculated = source.calculate("revenue", left="units", op="multiply", right="price")
+    adjusted = calculated.calculate("adjusted", left="revenue", op="divide", right=2)
+    total = adjusted.group_sum(by="group", value="adjusted", dropna=False)
+    sorted_frame = total.sort_values("adjusted", ascending=False, na_position="first")
+    selected = sorted_frame.select_columns(["adjusted", "group"])
+    renamed = selected.rename_columns({"adjusted": "__proto__", "group": "constructor"})
+    cases.append((analysis, [source, calculated, adjusted, total, sorted_frame, selected, renamed]))
     for story, frames in cases:
         checks = []
         for frame in frames:
@@ -123,6 +140,35 @@ def main():
                     "reference": {"step": total.step_id, "row": 0, "column": "v"},
                     "inputs": [],
                     "max_sources": 1,
+                }
+            ],
+        }
+    )
+    large = DataStory(max_steps=50)
+    source = large.table(pd.DataFrame({"k": ["a"] * 10, "v": [1] * 10}))
+    repeat = large.table(pd.DataFrame({"k": ["a"] * 10}))
+    total = source.group_sum(by="k", value="v", dropna=False)
+    for _ in range(17):
+        total = repeat.merge(total, on="k").group_sum(by="k", value="v", dropna=False)
+    page = total.explain_page(0, "v", offset=10**18 - 2)
+    contracts.append(
+        {
+            "data": large.to_dict(),
+            "checks": [],
+            "page_checks": [
+                {
+                    "reference": {"step": total.step_id, "row": 0, "column": "v"},
+                    "offset": str(page.offset),
+                    "total": str(page.total),
+                    "inputs": [
+                        {
+                            "step": o.step_id,
+                            "row": o.row,
+                            "column": o.column,
+                            "cell": encode_cell(o.value),
+                        }
+                        for o in page.origins
+                    ],
                 }
             ],
         }

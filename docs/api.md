@@ -4,14 +4,19 @@
 
 ```python
 DataStory(title="A data story", *, max_rows=200, max_columns=12,
-          max_steps=20, max_export_bytes=2_000_000)
+          max_steps=20, max_export_bytes=2_000_000, max_cells=None)
 ```
 
 Limits are positive integers. Source tables count as recorded steps. Exceeding a
 limit raises `CaptureLimitError`; capture does not silently sample. A text cell is
 limited to 20,000 characters; the same bound applies to column names and other
 displayed scalar strings. `max_export_bytes` covers UTF-8 JSON data, not bundled
-player assets.
+player assets or the compressed file size. `max_cells`, when set, limits the sum of
+row count × column count across all captured snapshots, including unrelated branches.
+
+`DataStory.for_analysis()` sets larger defaults: 50,000 rows, 24 columns, 50 steps,
+128,000,000 JSON bytes, and 2,000,000 cumulative cells. All budgets apply together.
+See [analysis and scale](analysis.md) for a complete example and resource limits.
 
 The title and limits can be reassigned and are validated on each assignment. A
 failed assignment preserves the previous value. Lowering capture limits does not
@@ -69,8 +74,8 @@ system preference always suppresses motion while enabled.
 ```python
 story.to_dict(result=frame)
 story.to_json(result=frame)
-story.to_html(result=frame, theme="auto")
-story.export_html("story.html", result=frame, theme="auto", overwrite=False)
+story.to_html(result=frame, theme="auto", compression="auto")
+story.export_html("story.html", result=frame, theme="auto", overwrite=False, compression="auto")
 story.export_info(result=frame)
 ```
 
@@ -88,7 +93,11 @@ are protected by an exclusive hard link when `overwrite=False`; overwrite mode u
 `os.replace`. Filesystems that do not support these operations may raise `OSError`.
 There is no unsafe fallback that overwrites an existing file silently.
 `overwrite` must be an actual boolean; the string `"false"` is rejected.
-JSON is encoded incrementally and stops once its byte limit is exceeded.
+JSON is encoded one row at a time and stops once its byte limit is exceeded,
+without materializing a second complete story dictionary. `compression` is `auto`,
+`gzip`, or `none`. Auto compresses JSON of at least 100,000 bytes when beneficial.
+The byte limit is enforced before compression. A browser without built-in gzip
+decompression needs an export using `compression="none"`.
 
 In Jupyter, `_repr_html_()` embeds the same player in a sandboxed `srcdoc` iframe.
 Notebook trust and the host's iframe policy can affect rendering.
@@ -96,6 +105,27 @@ Displaying an empty story shows a short start hint; explicit HTML export still
 requires a recorded table.
 
 ## StoryFrame
+
+### calculate, sort_values, select_columns, and rename_columns
+
+```python
+valued = frame.calculate("revenue", left="quantity", op="multiply", right="unit_price")
+adjusted = valued.calculate("half", left="revenue", op="divide", right=2)
+ranked = adjusted.sort_values("revenue", ascending=False, na_position="last")
+report = ranked.select_columns(["region", "revenue"]).rename_columns({"revenue": "sales"})
+```
+
+All four methods accept a display `label`. Calculations add a new column using
+numeric, non-boolean operands and one of `add`, `subtract`, `multiply`, or `divide`.
+Duration constants and arbitrary callback expressions are rejected. References
+record same-row operands in left/right order; constants are stored in the operation.
+Pandas determines missing values, dtype promotion, division, and overflow behavior.
+
+Sorting is stable. Multiple keys accept a matching list or tuple of boolean
+`ascending` settings. Column selection requires unique existing names; renaming
+requires an existing-name mapping and unique, nonempty output names. These operations
+retain positional provenance even when the DataFrame index contains duplicates.
+Selecting fewer columns does not remove those columns from ancestor tables in HTML.
 
 ### filter_rows
 
@@ -199,6 +229,23 @@ Duplicate source names receive distinct display labels without changing source I
 `StoryFrame.step_id` is read-only. Constructing a handle for an unknown step fails
 immediately. The player can clear its current selection, and uses a lookup set for
 highlights while keeping repeated origins in the displayed provenance list.
+
+### explain_page
+
+```python
+page = frame.explain_page(0, "sales", offset=0, limit=50)
+page.origins  # tuple[CellOrigin, ...]
+page.total  # exact number of source uses, including repetitions
+page.offset  # zero-based offset in that ordered list
+page.has_next
+```
+
+This returns an immutable `OriginPage`. Offsets are nonnegative integers, and page
+sizes are from 1 through 10,000. Past-end offsets return an empty tuple. Subtrees
+before the requested slice are skipped by their counts, without expanding all their
+source uses. The browser uses the same approach for 50-input pages and direct jumps,
+with exact BigInt counts. Its inspector no longer requires building the complete
+list under `explain()`'s default 10,000-input limit.
 
 ## Errors
 

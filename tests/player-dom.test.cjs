@@ -94,7 +94,7 @@ test("a lineage error cannot leave an unrelated value selected", (t) => {
   const p = mount();
   t.after(p.close);
   p.click('.data-row .cell[data-column="key"]');
-  p.window.FrameChoreoModel.traceCell = () => {
+  p.window.FrameChoreoModel.prepareTrace = () => {
     throw new Error("Too many inputs");
   };
   p.click('.data-row .cell[data-column="v"]');
