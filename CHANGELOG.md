@@ -2,6 +2,10 @@
 
 ## 0.1.0 — Unreleased
 
+- Preserve native float16/float32 text across snapshots and Python/browser provenance.
+- Show the selected column dtype, with a floating-point join example.
+- Count reachable source inputs before expansion, so reused computed zeros do not exhaust lineage limits.
+
 - Preserve sub-nanosecond NumPy datetime text and reject representation-changing predicates.
 - Validate live configuration, make frame identities read-only, and separate traversal budgets from capture caps.
 - Bound header/decimal display text and safely represent the minimum-count setting.

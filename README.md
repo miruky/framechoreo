@@ -112,6 +112,8 @@ resuming and changing speed preserve progress.
 **Clear selection** removes the inspection highlights. Sum explanations report
 insufficient non-missing inputs and flag recorded integer sums that differ from
 exact addition, helping identify dtype overflow while preserving the pandas result.
+Selecting a cell also shows its column dtype. Native float16/float32 formatting is
+retained; equal short decimal text can still hide different floating-point values.
 
 ## What the file contains
 
@@ -154,11 +156,14 @@ embedded and displayed as text. Input callbacks are trusted Python code, not a s
 python examples/sales_story.py
 python examples/missing_values.py
 python examples/classroom.py
+python examples/float_precision.py
 ```
 
 The generated HTML files appear in `examples/generated/`. Every example uses
 synthetic data. See [validation scope](docs/validation.md) for the environments and
 checks performed on the prepared release.
+The floating-point example shows why float32 and float64 keys can both display
+`0.1` yet fail to join, while `0.5` matches exactly in both types.
 
 For a complete notebook example, install the optional notebook tools from the
 source checkout and open [examples/notebook.ipynb](examples/notebook.ipynb):

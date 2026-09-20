@@ -158,3 +158,17 @@ test("inspecting a value settles transient rows instead of freezing ghosts", (t)
   assert.equal(p.document.querySelectorAll(".data-row").length, 1);
   assert.equal(p.animations.filter((a) => ["running", "paused"].includes(a.playState)).length, 0);
 });
+
+test("the inspector identifies column precision without changing the recorded value", (t) => {
+  const data = fixture();
+  data.steps[0].dtypes = ["str", "float32"];
+  data.steps[0].rows[0].cells[1] = { type: "float", value: "0.1", display: "0.1" };
+  const p = mount(data);
+  t.after(p.close);
+  p.click('.data-row .cell[data-column="v"]');
+  assert.equal(p.document.querySelector(".selected-value").textContent, "0.1");
+  assert.equal(p.document.querySelector(".column-dtype")?.textContent, "Column dtype: float32");
+  assert.match(p.document.querySelector('.cell[data-column="v"]').title, /float32/);
+  p.click('[data-action="clear-selection"]');
+  assert.equal(p.document.querySelector(".column-dtype").textContent, "");
+});

@@ -143,6 +143,7 @@
     const inspectorHead = el("div", "inspector-head", "SELECT A VALUE"),
       selectedValue = el("div", "selected-value", "Select any cell to trace its value inputs.");
     const selectedType = el("div", "value-type");
+    const columnDtype = el("div", "value-type column-dtype");
     const origins = el("div", "origins"),
       originPager = el("div", "origin-pager"),
       explanation = el("div", "explanation");
@@ -156,6 +157,7 @@
         inspectorHead.textContent = "SELECT A VALUE";
         selectedValue.textContent = "Select any cell to trace its value inputs.";
         selectedType.textContent = "";
+        columnDtype.textContent = "";
         origins.replaceChildren();
         originPager.replaceChildren();
         explanation.textContent = "";
@@ -174,6 +176,7 @@
       inspectorTitle,
       selectedValue,
       selectedType,
+      columnDtype,
       origins,
       originPager,
       explanation,
@@ -280,6 +283,7 @@
         model.tableLabel(data, tableData) + " · row " + (row + 1) + " · " + column;
       selectedValue.textContent = cell.display;
       selectedType.textContent = "Type: " + cell.type;
+      columnDtype.textContent = dtypeLabel(step, column);
       clearSelection.hidden = false;
       explanation.classList.remove("calculation-note");
       origins.replaceChildren();
@@ -390,7 +394,8 @@
       b.dataset.row = String(row);
       b.dataset.column = column;
       b.dataset.type = cell.type;
-      b.title = cell.display + "\nType: " + cell.type;
+      const dtype = dtypeLabel(step, column);
+      b.title = cell.display + "\nType: " + cell.type + (dtype ? "\n" + dtype : "");
       b.setAttribute(
         "aria-label",
         column +
@@ -400,6 +405,11 @@
           "; trace value inputs",
       );
       return b;
+    }
+    function dtypeLabel(step, column) {
+      const tableData = steps.get(step),
+        dtype = tableData.dtypes?.[tableData.columns.indexOf(column)];
+      return typeof dtype === "string" ? "Column dtype: " + dtype : "";
     }
     function renderReference(scene) {
       const wasOpen =

@@ -49,6 +49,37 @@ def main():
         )
     )
     cases.append((precise, [source, source.filter_rows([True])]))
+    for dtype in ["float16", "float32", "Float32", "float64", "Float64"]:
+        story = DataStory()
+        source = story.table(
+            pd.DataFrame(
+                {
+                    "key": ["a", "a", "b"],
+                    "v": pd.Series([0.1, 0.2, 0.3], dtype=dtype),
+                    "id": [2**60 + 1, 2**60 + 3, 2**60 + 5],
+                }
+            )
+        )
+        filtered = source.filter_rows([True, True, True])
+        lookup = story.table(pd.DataFrame({"key": ["a"], "category": ["matched"]}))
+        joined = filtered.merge(lookup, on="key")
+        total = joined.group_sum(by="category", value="v", dropna=False)
+        cases.append((story, [source, filtered, lookup, joined, total]))
+    for present in [False, True]:
+        story = DataStory()
+        source = story.table(
+            pd.DataFrame(
+                {
+                    "key": range(6),
+                    "v": pd.Series([7 if present else pd.NA] + [pd.NA] * 5, dtype="Int64"),
+                }
+            )
+        )
+        filled = source.group_sum(by="key", value="v", dropna=False, min_count=0)
+        lookup = story.table(pd.DataFrame({"key": range(6), "category": ["all"] * 6}))
+        joined = filled.merge(lookup, on="key")
+        total = joined.group_sum(by="category", value="v", dropna=False)
+        cases.append((story, [source, filled, lookup, joined, total]))
     contracts = []
     for story, frames in cases:
         checks = []
@@ -75,6 +106,27 @@ def main():
                         }
                     )
         contracts.append({"data": story.to_dict(), "checks": checks})
+    story = DataStory()
+    source = story.table(
+        pd.DataFrame({"key": ["all"] * 100, "v": pd.Series([pd.NA] * 100, dtype="Int64")})
+    )
+    total = source.group_sum(by="key", value="v", dropna=False, min_count=0)
+    repeat = story.table(pd.DataFrame({"key": ["all"] * 100}))
+    for _ in range(3):
+        total = repeat.merge(total, on="key").group_sum(by="key", value="v", dropna=False)
+    assert total.explain(0, "v", max_sources=1) == ()
+    contracts.append(
+        {
+            "data": story.to_dict(),
+            "checks": [
+                {
+                    "reference": {"step": total.step_id, "row": 0, "column": "v"},
+                    "inputs": [],
+                    "max_sources": 1,
+                }
+            ],
+        }
+    )
     proc = subprocess.run(
         ["node", str(Path(__file__).with_name("verify-wire.cjs"))],
         input=json.dumps(contracts),

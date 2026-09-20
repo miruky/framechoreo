@@ -22,6 +22,10 @@ comes from the native GroupBy object and its group numbers.
 For a sum, value-input references omit missing numeric inputs. Row membership,
 grouping keys, and minimum-count settings are retained separately. Repeated
 references are intentional: adding an aggregate twice must show its inputs twice.
+Tracing first computes capped source counts over the reachable cell graph. Shared
+cells are counted once for this pass, while each reference contributes its count.
+Only branches with raw inputs are then expanded, preserving order and multiplicity.
+This avoids enumerating repeated empty branches created by `min_count=0` sums.
 
 ## Presentation
 
@@ -42,6 +46,9 @@ Numbers have typed display encodings. In particular, integers use decimal string
 so values above JavaScript's safe-integer range do not change in the browser.
 Date/time values use ISO representations, and column dtypes are recorded. This is
 a display format, not a general-purpose pandas round-trip serializer.
+Column-array scalar reads retain the native formatting of float16/float32 values;
+tuple iteration could otherwise box them as Python floats and alter their text.
+The selected column dtype is visible alongside the cell's display type.
 
 Capture rejects invalid Unicode before serialization. JSON encoding stops at the
 configured byte limit instead of first constructing an arbitrarily large string.

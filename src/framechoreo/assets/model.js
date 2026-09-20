@@ -220,22 +220,35 @@
       pending = [reference],
       result = [];
     validateReference(steps, reference);
-    const ancestors = new Set(),
-      queue = [reference.step];
-    while (queue.length) {
-      const id = queue.pop();
-      if (!ancestors.has(id)) {
-        ancestors.add(id);
-        queue.push(...steps.get(id).parents);
+    const counts = new Map(),
+      work = [[reference, false]],
+      keyOf = (ref) => cellKey(ref.step, ref.row, ref.column);
+    while (work.length) {
+      const [ref, expanded] = work.pop(),
+        key = keyOf(ref);
+      if (counts.has(key)) continue;
+      const step = steps.get(ref.step);
+      if (step.operation === "source") {
+        counts.set(key, 1);
+        continue;
+      }
+      const refs = step.rows[ref.row].cell_parents[ref.column];
+      if (expanded) {
+        counts.set(
+          key,
+          refs.reduce((total, parent) => Math.min(limit + 1, total + counts.get(keyOf(parent))), 0),
+        );
+      } else {
+        work.push([ref, true]);
+        for (const parent of refs) if (!counts.has(keyOf(parent))) work.push([parent, false]);
       }
     }
-    let visited = 0;
+    if (counts.get(keyOf(reference)) > limit)
+      throw new Error("This value has too many source cells to display.");
     while (pending.length) {
-      if (++visited > limit * ancestors.size) {
-        throw new Error("This value has too many ancestors to display. Select an earlier step.");
-      }
-      const ref = pending.pop(),
-        step = steps.get(ref.step);
+      const ref = pending.pop();
+      if (counts.get(keyOf(ref)) === 0) continue;
+      const step = steps.get(ref.step);
       const row = step && step.rows[ref.row];
       if (!row || !step.columns.includes(ref.column)) throw new Error("Invalid cell reference");
       if (step.operation === "source") {
@@ -246,8 +259,6 @@
           column: ref.column,
           cell: row.cells[step.columns.indexOf(ref.column)],
         });
-        if (result.length > limit)
-          throw new Error("This value has too many source cells to display.");
       } else {
         const refs = Object.prototype.hasOwnProperty.call(row.cell_parents, ref.column)
           ? row.cell_parents[ref.column]

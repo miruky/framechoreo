@@ -47,6 +47,7 @@ jobs:
       - run: python examples/sales_story.py
       - run: python examples/missing_values.py
       - run: python examples/classroom.py
+      - run: python examples/float_precision.py
       - run: python -m build
       - run: python -m twine check dist/*
       - run: python tests/check_distribution.py

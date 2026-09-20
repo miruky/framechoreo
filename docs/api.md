@@ -36,6 +36,10 @@ Unpaired Unicode surrogates are rejected during capture, before a snapshot is ad
 Whitespace-only column names are rejected. NumPy datetime scalars retain their
 native string precision rather than being converted through pandas Timestamp;
 FrameChoreo records the values already stored in the supplied DataFrame.
+Cells are read from individual column arrays, preserving float16/float32 scalar
+formatting without coercing a mixed numeric row. The inspector shows the selected
+column's dtype. Equal short decimal text does not imply equal values across float
+precisions; `examples/float_precision.py` demonstrates this with join keys.
 
 ### annotate
 
@@ -171,8 +175,10 @@ an index label. Each immutable `CellOrigin` has `source`, `step_id`, `row`, `col
 and `value`. The player's visible row numbers start at one.
 
 Repeated use of a source cell is preserved in the tuple. Empty lineage does not
-guess a match from equal values. A bounded traversal raises `CaptureLimitError`
-when there are too many source inputs. The browser shows up to 50 origin buttons
+guess a match from equal values. Reachable cells are counted once before repeated
+source uses are expanded. Computed values with no raw inputs, such as an all-missing
+sum with `min_count=0`, do not consume `max_sources`. A count above that limit raises
+`CaptureLimitError` before building the origin list. The browser shows up to 50 origin buttons
 per page, with controls to visit every recorded origin. Inspecting an origin reveals
 and focuses its source cell. Right-hand join inputs can be opened in full; an
 intermediate right input is identified as an input rather than as an original source.

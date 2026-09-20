@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import math
-from collections.abc import Callable, Mapping, Sequence, Set
+from collections.abc import Callable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -107,6 +107,13 @@ def _detached_copy(frame: pd.DataFrame) -> pd.DataFrame:
         if isinstance(dtype, pd.CategoricalDtype):
             result.isetitem(position, _copy_categorical(frame.iloc[:, position].array))
     return result
+
+
+def _row_values(frame: pd.DataFrame) -> Iterator[tuple[Any, ...]]:
+    """Read column scalars without tuple boxing or mixed-row numeric coercion."""
+    columns = [frame[column].array for column in frame.columns]
+    for row in range(len(frame)):
+        yield tuple(column[row] for column in columns)
 
 
 class DataStory:
@@ -215,7 +222,7 @@ class DataStory:
             raise UnsupportedDataError("At least one column is required")
         for column in frame.columns:
             validate_text(column)
-        for values in frame.itertuples(index=False, name=None):
+        for values in _row_values(frame):
             for value in values:
                 encode_cell(value)
         step = _Step(
@@ -291,7 +298,7 @@ class DataStory:
             if step.id not in required:
                 continue
             rows = []
-            for i, values in enumerate(step.frame.itertuples(index=False, name=None)):
+            for i, values in enumerate(_row_values(step.frame)):
                 refs = step.row_parents[i] if step.row_parents else ()
                 cell_refs = step.cell_parents[i] if step.cell_parents else {}
                 rows.append(
@@ -414,16 +421,11 @@ class StoryFrame:
         label: str = "Filter rows",
     ) -> StoryFrame:
         df = self.to_pandas()
-        before = tuple(
-            tuple(cell_signature(v) for v in row) for row in df.itertuples(index=False, name=None)
-        )
+        before = tuple(tuple(cell_signature(v) for v in row) for row in _row_values(df))
         mask = predicate(df) if callable(predicate) else predicate
         try:
             pd.testing.assert_frame_equal(df, self._snapshot.frame, check_exact=True)
-            after = tuple(
-                tuple(cell_signature(v) for v in row)
-                for row in df.itertuples(index=False, name=None)
-            )
+            after = tuple(tuple(cell_signature(v) for v in row) for row in _row_values(df))
             if before != after:
                 raise ValueError("Recorded cell representation changed")
         except (AssertionError, TypeError, ValueError) as exc:
@@ -616,15 +618,33 @@ class StoryFrame:
             raise KeyError(column)
         if isinstance(max_sources, bool) or not isinstance(max_sources, int) or max_sources < 1:
             raise ValueError("max_sources must be a positive integer")
-        pending = [_CellRef(self.step_id, row, column)]
-        traversal_limit = max_sources * len(self._story._ancestors(self.step_id))
+        reference = _CellRef(self.step_id, row, column)
+        # Count each reachable cell once before expanding repeated source uses.
+        # A computed zero can have no raw inputs but many paths leading to it.
+        counts: dict[_CellRef, int] = {}
+        work = [(reference, False)]
+        while work:
+            ref, expanded = work.pop()
+            if ref in counts:
+                continue
+            step = self._story._step(ref.step)
+            if step.operation == "source":
+                counts[ref] = 1
+                continue
+            parents = step.cell_parents[ref.row].get(ref.column, ())
+            if expanded:
+                counts[ref] = min(max_sources + 1, sum(counts[parent] for parent in parents))
+            else:
+                work.append((ref, True))
+                work.extend((parent, False) for parent in parents if parent not in counts)
+        if counts[reference] > max_sources:
+            raise CaptureLimitError("Cell has more than max_sources inputs")
+        pending = [reference]
         origins = []
-        visited = 0
         while pending:
             ref = pending.pop()
-            visited += 1
-            if visited > traversal_limit:
-                raise CaptureLimitError("Lineage traversal exceeds the limit")
+            if counts[ref] == 0:
+                continue
             step = self._story._step(ref.step)
             if step.operation == "source":
                 origins.append(
@@ -636,8 +656,6 @@ class StoryFrame:
                         step.frame.iat[ref.row, step.frame.columns.get_loc(ref.column)],
                     )
                 )
-                if len(origins) > max_sources:
-                    raise CaptureLimitError("Cell has more than max_sources inputs")
             else:
                 pending.extend(reversed(step.cell_parents[ref.row].get(ref.column, ())))
         return tuple(origins)

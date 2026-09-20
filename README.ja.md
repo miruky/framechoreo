@@ -46,6 +46,8 @@ python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 
 「Clear selection」で選択を解除できます。合計が欠損になる場合は必要な入力件数を
 説明し、整数の正確な足し算とpandasの結果が異なる場合は桁あふれの可能性を示します。
+値を選ぶと列の型も確認できます。`float_precision.py` は、同じ「0.1」と表示される
+`float32`と`float64`のキーが結合で一致しない例です。HTMLにも各型の表示を保ちます。
 
 説明の注記・再生時の間・強調する列は、計算と分けて指定できます。
 
