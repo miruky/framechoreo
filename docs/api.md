@@ -200,6 +200,31 @@ inputs using exact integer addition and flag a possible dtype overflow. These
 focused diagnostics preserve the recorded pandas value and are not a general
 verification of arbitrary calculations.
 
+### group_mean and group_count
+
+```python
+average = frame.group_mean(by="category", value="amount", dropna=False, sort=False)
+present = frame.group_count(by="category", value="amount", dropna=False, sort=False)
+```
+
+Both share `group_sum`'s `by`, `dropna`, and `sort` contract, including observed
+categorical grouping and group membership coming from the keys alone, independent
+of the value column's own missing entries. Neither accepts `min_count`: pandas has
+no such setting for `mean` or `count`, so the recorded parameters omit that key
+entirely, and the player rejects a story that adds one.
+
+`group_mean` requires a numeric, non-boolean `value` column, matching `group_sum`.
+A group with no non-missing values is missing, since `mean` skips missing values
+by default and there is no minimum count to configure. `group_count` accepts a
+`value` column of any supported scalar type; it reports **the number of non-missing
+entries of that column per group, not the number of rows**, so a fully missing
+group counts as zero rather than becoming missing.
+
+Both trace the same non-missing value cells that `group_sum` traces for the same
+inputs, so repeated use, empty lineage, and paging behave identically. The default
+label is `"Group and average"` for `group_mean` and `"Group and count"` for
+`group_count`.
+
 For text cells, the player distinguishes empty strings and whitespace-only strings
 with a small label. These values use JSON-style quoting in the table and inspector,
 so tabs and newlines are visible. The displayed type description distinguishes an

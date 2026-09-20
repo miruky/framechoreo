@@ -78,6 +78,48 @@ DataFrame index labels remain in `to_pandas()`, while provenance uses row positi
 column is required. `rename_columns(mapping)` maps existing names to nonempty names
 and rejects duplicate output names. Both retain references to the original cells.
 
+`group_mean(by=..., value=..., dropna=..., sort=False)` averages a numeric,
+non-boolean column. `group_count(...)` counts non-missing values of any supported
+scalar type; it does not count all rows. Like `group_sum`, they use observed groups
+and positional input references. Mean returns missing for an all-missing group;
+count returns zero. Neither takes `min_count`. Group membership includes rows with
+a missing value, while the aggregated value's inputs exclude those missing cells.
+Run `python examples/group_aggregates.py` for both examples.
+
+## Following values in motion
+
+Run `python examples/motion_showcase.py` and open `examples/generated/motion-showcase.html`.
+The example compares its complete result against ordinary pandas. It includes an
+excluded negative sale, stable sorting, a repeated join input, an unmatched product,
+and a missing value that does not contribute to the sum.
+
+Join scenes show up to 12 distinct source cells relevant to the result preview.
+They come directly from the recorded right-hand input. The full input remains
+available in the expandable table and its inspection view. A wide display places
+the cards beside the result; a narrow display uses a horizontal card strip.
+Matched missing values retain their recorded source. Unmatched values have no
+invented source or movement.
+
+Grouping rows and results share a `G` number and a color; the six colors repeat,
+so the labels remain necessary. Sum, mean, and count move their non-missing value
+inputs, rather than entire rows. These are immediate inputs to the operation;
+selecting the result follows them recursively to raw sources.
+
+Motion uses measured positions of fully visible cells and is limited to 48 moving
+values. Its counter describes inputs for the shown result rows, not the entire
+dataset or the full recursive provenance count. Cells outside the current view
+remain static. Expanded/paged tables stay static too. These display limits do not
+change calculations or recorded provenance.
+
+Forward adjacent steps animate. A direct chapter jump or backward navigation
+does not invent a transformation between unrelated layouts. **Replay the movement**
+repeats the transition through its preceding scene; expanded views and reduced
+motion disable replay. Play/pause and speed apply to value and row movement.
+Selecting a value, scrolling, resizing, changing views, or expanding the code
+settles any movement whose geometry is no longer current. The reader's and OS
+reduced-motion preferences remain effective. **Python operation** opens the recorded
+operation without executing it.
+
 ## Browsing and tracing
 
 The initial view remains a 12-row preview. **Browse all** opens tables with more than

@@ -60,7 +60,11 @@ def main() -> None:
             "tests/player-integrity.test.cjs",
             "tests/player-navigation.test.cjs",
             "tests/player-scale.test.cjs",
+            "tests/player-flow.test.cjs",
+            "tests/player-motion.test.cjs",
+            "tests/motion-fixtures.cjs",
             "tests/test_analysis.py",
+            "tests/test_group_aggregates.py",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -68,6 +72,8 @@ def main() -> None:
             "examples/float_precision.py",
             "examples/blank_strings.py",
             "examples/large_analysis.py",
+            "examples/group_aggregates.py",
+            "examples/motion_showcase.py",
             "docs/analysis.md",
             "docs/api.md",
             "LICENSE",
@@ -105,6 +111,14 @@ assert analysis_result.to_pandas().iat[0, 1] == 1001000
 last_page = analysis_result.explain_page(0, "total", offset=999)
 assert last_page.total == 1000 and last_page.origins[0].value == 1000
 assert 'data-encoding="gzip-base64"' in analysis_story.to_html(result=analysis_result)
+ratings = analysis_story.table(pd.DataFrame({"key": ["a", "a", "a"], "score": [5., 4., None]}))
+average = ratings.group_mean(by="key", value="score", dropna=False)
+counted = ratings.group_count(by="key", value="score", dropna=False)
+assert average.to_pandas().iat[0, 1] == 4.5
+assert counted.to_pandas().iat[0, 1] == 2
+assert [o.value for o in average.explain(0, "score")] == [5., 4.]
+assert counted.explain_page(0, "score").total == 2
+assert 'value-flight' in analysis_story.to_html(result=average)
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),

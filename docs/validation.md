@@ -1,6 +1,6 @@
 # Validation scope for 0.1.0
 
-Local checks were performed on macOS on 2026-09-20. All **117 Python tests** passed
+Local checks were performed on macOS on 2026-09-20 and 2026-09-21. All **145 Python tests** passed
 in each environment below. The suite configures up to 320 generated examples across four
 property tests, plus full DataFrame comparisons and independent source-membership
 checks.
@@ -15,7 +15,7 @@ checks.
 
 The covered behaviors include:
 
-- Filter, join, and sum results against ordinary pandas, including dtypes and column metadata.
+- Filter, join, sum, mean, and non-missing count results against ordinary pandas, including dtypes and column metadata.
 - Source-cell identities with duplicate indices and repeated values.
 - Missing join keys, unmatched rows, duplicate right keys, empty results, and nullable sums.
 - Multiple grouping keys and categorical columns, with both sorting and missing-key policies.
@@ -32,7 +32,7 @@ The covered behaviors include:
 - Presentation annotations that do not change data or provenance.
 - Script-boundary escaping, self-contained assets, notebook iframe markup, and file replacement guards.
 
-All **60 JavaScript tests** passed with Node.js 25.9.0. Model tests cover scene
+All **98 JavaScript tests** passed with Node.js 25.9.0. Model tests cover scene
 construction, source resolution, multiplicity, malformed references, limits,
 annotation timing, and distinct labels for missing values and duplicate names.
 DOM tests use jsdom and a controlled clock to exercise the actual player controls:
@@ -40,7 +40,7 @@ play/pause/resume, remaining hold time, speed changes, animation pausing, focus,
 origin pagination, and complete right-input inspection. They do not measure browser
 layout. Additional cases cover selection clearing, calculation explanations,
 record/result consistency, safe counts, and Unicode character limits. The cross-language
-check compares 439 selected cells and a page near the end of 10^18 logical source
+check compares 559 selected cells and a page near the end of 10^18 logical source
 uses between Python and JavaScript, including arithmetic, sorting, column selection,
 renaming, native floats, empty branches, and repeated reuse.
 Additional DOM cases cover moving focus to origins, returning to the selected scene
@@ -128,3 +128,31 @@ The baseline is commit `b7506ac`. Groups are requested before filtering.
 The 100-group JSON encoding time remained about 2.6 seconds; this change does not
 claim every stage became faster. Results vary with data, platform, and machine load.
 See [analysis and scale](analysis.md) for capture budgets and the in-memory boundary.
+
+## Value movement and aggregate follow-up
+
+Mean/count tests compare results and dtypes with pandas, including missing values,
+multiple keys, repeated provenance, empty branches, nullable and categorical inputs,
+duplicate indices, invalid requests, and paged origins. Count means non-missing
+entries, not row count. The Python/JavaScript comparison includes both operations.
+
+Motion tests use distinct synthetic cell rectangles and a controlled clock. They
+check measured source/destination offsets, a status line changing layout, compact
+numeric tokens, null-key matches, matched missing values versus non-matches,
+repeated right inputs, the 48-token cap, offscreen inputs, zero-input groups,
+pause/resume at the last scene, speed, reduced motion, view changes, and cleanup.
+The tests assert that only contributing aggregate values move. Two earlier row-ghost
+tests were updated to this value-level contract with explicit source/target checks;
+their exclusion checks were retained. Chapter jumps now stay static, so the existing
+inspection-cleanup test first visits the grouping scene to create a real transition.
+
+The Japanese showcase was inspected in Chromium at the default desktop viewport
+and at 390×844. The join used repeated Books/Home inputs from labeled cards; the
+aggregate used 120 and 80 for Books=200 and did not animate the missing sale. The
+number of moving inputs reflected the fully visible subset. Paused rectangles
+remained unchanged across observations. At 390 pixels the document stayed within
+its width; keyboard replay retained a scroll position of 295.5 pixels and animated
+all five visible join inputs. Automated locator clicks may scroll a control into
+view before activating it; keyboard replay was used to distinguish that behavior
+from the player's scroll handling. These checks do not establish Safari/Firefox
+compatibility or accessibility certification.

@@ -2,6 +2,11 @@
 
 ## 0.1.0 — Unreleased
 
+- Animate recorded join inputs from compact source cards and non-missing aggregate values into their actual destination cells.
+- Add group numbers and tinted rows, distinguish selected values from source highlights, and provide replay with shared pause/speed controls.
+- Keep motion bounded to fully visible cells and settle it on scrolling, resizing, inspection, or layout changes; make operation code expandable.
+- Add a Japanese motion showcase and regression checks for geometry, clipping, repeated inputs, missing values, and playback cleanup.
+- Add `group_mean` and `group_count`, consistent with `group_sum`'s membership and value-input tracing; `group_count` reports non-missing entries per group, not the row count.
 - Add an opt-in analysis profile with larger row budgets and a cumulative cell limit.
 - Record row-wise numeric calculations, stable sorting, column selection, and renaming.
 - Add exact, bounded provenance pages and direct row/input navigation for larger stories.

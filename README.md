@@ -98,6 +98,8 @@ iframe through `_repr_html_()`.
 | `filter_rows(predicate)` | Evaluates a callable once on a copy, or accepts a boolean mask; rejects input mutation and ambiguous Series alignment |
 | `merge(right, on=...)` | Explicit keys, inner/left joins, one-to-one or many-to-one validation; uses pandas null-key behavior |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
+| `group_mean(by=..., value=..., dropna=...)` | Numeric non-boolean values; a group with no non-missing values is missing, since pandas skips missing values with no `min_count` to set |
+| `group_count(by=..., value=..., dropna=...)` | Counts non-missing entries of any supported column type per group; this is not the row count, and a fully missing group counts as zero |
 | `calculate(name, left=..., op=..., right=...)` | Row-wise add/subtract/multiply/divide with a numeric column or scalar; records actual operands |
 | `sort_values(by, ...)` | Stable sorting with retained positional provenance |
 | `select_columns([...])` / `rename_columns({...})` | Choose, reorder, and rename columns while retaining their inputs |
@@ -186,6 +188,8 @@ python examples/missing_values.py
 python examples/classroom.py
 python examples/float_precision.py
 python examples/blank_strings.py
+python examples/group_aggregates.py
+python examples/motion_showcase.py
 python examples/large_analysis.py --rows 5000
 ```
 
@@ -195,6 +199,11 @@ checks performed on the prepared release.
 The floating-point example shows why float32 and float64 keys can both display
 `0.1` yet fail to join, while `0.5` matches exactly in both types.
 The blank-string example shows why `notna()` retains empty strings and spaces.
+The motion showcase follows a small Japanese sales example through filtering,
+sorting, joining, and summing. Join values travel from labeled source cards to
+their recorded destinations; non-missing aggregate inputs converge into the result.
+Group numbers accompany the colors. **Replay the movement** repeats a transition,
+and **Python operation** opens its code. See [motion limits](docs/analysis.md#following-values-in-motion).
 
 For a complete notebook example, install the optional notebook tools from the
 source checkout and open [examples/notebook.ipynb](examples/notebook.ipynb):

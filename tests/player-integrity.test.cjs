@@ -75,6 +75,28 @@ test("a selection can be cleared without changing the scene", (t) => {
   assert.equal(p.document.querySelectorAll(".origin").length, 0);
   assert.match(p.document.querySelector(".selected-value").textContent, /Select any cell/);
 });
+test("group_mean and group_count display their own operation, never SUM", (t) => {
+  for (const [operation, label] of [
+    ["group_mean", "MEAN"],
+    ["group_count", "COUNT"],
+  ]) {
+    const p = mount(fixture(3, operation));
+    t.after(p.close);
+    p.click(".chapter:last-child");
+    assert.equal(p.scene(), label);
+    assert.match(p.document.querySelector(".code").textContent, new RegExp(operation.slice(6)));
+  }
+});
+test("group_mean and group_count grouping notes omit min_count", (t) => {
+  for (const operation of ["group_mean", "group_count"]) {
+    const p = mount(fixture(3, operation));
+    t.after(p.close);
+    p.click(".chapter:last-child");
+    const notice = p.document.querySelector(".notice").textContent;
+    assert.doesNotMatch(notice, /min_count/);
+    assert.match(notice, /excluded by grouping/);
+  }
+});
 test("missing totals explain the minimum input count", (t) => {
   const data = fixture();
   data.steps[2].parameters.min_count = 4;
@@ -124,6 +146,63 @@ test("integer overflow is visible while the recorded pandas value stays unchange
   );
 });
 
+test("an empty-input group_mean explains a missing average", (t) => {
+  const data = fixture(3, "group_mean");
+  data.steps[2].rows[0].cell_parents.v = [];
+  data.steps[2].rows[0].cells[1] = { type: "missing", value: null, display: "∅" };
+  const p = mount(data);
+  t.after(p.close);
+  p.click(".chapter:last-child");
+  p.click('.data-row .cell[data-column="v"]');
+  assert.match(
+    p.document.querySelector(".explanation").textContent,
+    /no non-missing.*missing average/i,
+  );
+});
+test("a group_mean with empty inputs but a present value warns of a conflict", (t) => {
+  const data = fixture(3, "group_mean");
+  data.steps[2].rows[0].cell_parents.v = [];
+  const p = mount(data);
+  t.after(p.close);
+  p.click(".chapter:last-child");
+  p.click('.data-row .cell[data-column="v"]');
+  assert.match(
+    p.document.querySelector(".explanation").textContent,
+    /conflicts with its empty input references/,
+  );
+});
+test("an empty-input group_count explains a zero count", (t) => {
+  const data = fixture(3, "group_count");
+  data.steps[2].rows[0].cell_parents.v = [];
+  data.steps[2].rows[0].cells[1] = { type: "integer", value: "0", display: "0" };
+  const p = mount(data);
+  t.after(p.close);
+  p.click(".chapter:last-child");
+  p.click('.data-row .cell[data-column="v"]');
+  assert.match(
+    p.document.querySelector(".explanation").textContent,
+    /no non-missing.*the count is 0/i,
+  );
+});
+test("a recorded group_count that disagrees with its traced inputs warns", (t) => {
+  const data = fixture(3, "group_count");
+  data.steps[2].rows[0].cells[1] = { type: "integer", value: "99", display: "99" };
+  const p = mount(data);
+  t.after(p.close);
+  p.click(".chapter:last-child");
+  p.click('.data-row .cell[data-column="v"]');
+  assert.match(
+    p.document.querySelector(".explanation").textContent,
+    /conflicts with its 3 traced non-missing input references/,
+  );
+});
+test("group_mean and group_count reject a recorded min_count setting", () => {
+  for (const operation of ["group_mean", "group_count"]) {
+    const data = fixture(3, operation);
+    data.steps[2].parameters.min_count = 1;
+    assert.throws(() => model.indexStory(data), /Invalid story/);
+  }
+});
 test("inconsistent empty lineage does not invent a min_count=0 setting", (t) => {
   const data = fixture();
   data.steps[2].rows[0].cell_parents.v = [];
@@ -151,6 +230,7 @@ test("astral Unicode characters count as characters rather than UTF-16 halves", 
 test("inspecting a value settles transient rows instead of freezing ghosts", (t) => {
   const p = mount();
   t.after(p.close);
+  p.click(".chapter:nth-child(3)");
   p.click(".chapter:last-child");
   assert.ok(p.document.querySelectorAll(".ghost").length > 0);
   p.click('.data-row:not(.ghost) .cell[data-column="v"]');

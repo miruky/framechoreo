@@ -806,6 +806,43 @@ class StoryFrame:
             },
         )
 
+    def _group_keys_and_value(
+        self, df: pd.DataFrame, by: str | Sequence[str], value: str
+    ) -> list[str]:
+        keys = _keys(by, df.columns)
+        if not isinstance(value, str) or value not in df.columns or value in keys:
+            raise ValueError("value must name a column outside the grouping keys")
+        return keys
+
+    def _group_provenance(
+        self, df: pd.DataFrame, keys: list[str], value: str, group_ids: np.ndarray, n_groups: int
+    ) -> tuple[
+        tuple[tuple[_RowRef, ...], ...],
+        tuple[dict[str, tuple[_CellRef, ...]], ...],
+        list[dict[str, Any]],
+    ]:
+        """Build group membership and value-input references shared by every aggregation.
+
+        Membership comes only from the grouping keys; the value column's own
+        missing entries are excluded from its references but never from membership,
+        so the grouping scene and every aggregation agree on which rows belong.
+        """
+        members_by_group: list[list[int]] = [[] for _ in range(n_groups)]
+        for position, group in enumerate(group_ids):
+            if not pd.isna(group):
+                members_by_group[int(group)].append(position)
+        present = df[value].notna().to_numpy(dtype=bool)
+        row_parents = []
+        cell_parents = []
+        groups = []
+        for i, members in enumerate(members_by_group):
+            row_parents.append(tuple(_RowRef(self.step_id, j) for j in members))
+            refs = {c: tuple(_CellRef(self.step_id, j, c) for j in members) for c in keys}
+            refs[value] = tuple(_CellRef(self.step_id, j, value) for j in members if present[j])
+            cell_parents.append(refs)
+            groups.append({"output_row": i, "input_rows": members})
+        return tuple(row_parents), tuple(cell_parents), groups
+
     def group_sum(
         self,
         *,
@@ -816,10 +853,9 @@ class StoryFrame:
         sort: bool = False,
         label: str = "Group and sum",
     ) -> StoryFrame:
+        """Sum a numeric column per group. Missing keys and ``min_count`` are explicit."""
         df = self.to_pandas()
-        keys = _keys(by, df.columns)
-        if not isinstance(value, str) or value not in df.columns or value in keys:
-            raise ValueError("value must name a column outside the grouping keys")
+        keys = self._group_keys_and_value(df, by, value)
         if not isinstance(dropna, bool) or not isinstance(sort, bool):
             raise ValueError("dropna and sort must be booleans")
         if (
@@ -835,33 +871,109 @@ class StoryFrame:
         grouped = df.groupby(keys, dropna=dropna, sort=sort, observed=True)
         output = grouped[value].sum(min_count=min_count).reset_index()
         group_ids = grouped.ngroup().to_numpy()
-        members_by_group: list[list[int]] = [[] for _ in range(len(output))]
-        for position, group in enumerate(group_ids):
-            if not pd.isna(group):
-                members_by_group[int(group)].append(position)
-        present = df[value].notna().to_numpy(dtype=bool)
-        row_parents = []
-        cell_parents = []
-        groups = []
-        for i, members in enumerate(members_by_group):
-            row_parents.append(tuple(_RowRef(self.step_id, j) for j in members))
-            refs = {c: tuple(_CellRef(self.step_id, j, c) for j in members) for c in keys}
-            refs[value] = tuple(_CellRef(self.step_id, j, value) for j in members if present[j])
-            cell_parents.append(refs)
-            groups.append({"output_row": i, "input_rows": members})
+        row_parents, cell_parents, groups = self._group_provenance(
+            df, keys, value, group_ids, len(output)
+        )
         return self._story._add(
             output,
             name="Grouped sum",
             operation="group_sum",
             label=label,
             parents=(self.step_id,),
-            row_parents=tuple(row_parents),
-            cell_parents=tuple(cell_parents),
+            row_parents=row_parents,
+            cell_parents=cell_parents,
             parameters={
                 "by": keys,
                 "value": value,
                 "dropna": dropna,
                 "min_count": min_count,
+                "sort": sort,
+                "groups": groups,
+                "excluded_rows": int(pd.isna(group_ids).sum()),
+            },
+        )
+
+    def group_mean(
+        self,
+        *,
+        by: str | Sequence[str],
+        value: str,
+        dropna: bool,
+        sort: bool = False,
+        label: str = "Group and average",
+    ) -> StoryFrame:
+        """Average a numeric column per group. A group with no non-missing values is missing.
+
+        pandas skips missing values by default, so there is no ``min_count`` to set.
+        """
+        df = self.to_pandas()
+        keys = self._group_keys_and_value(df, by, value)
+        if not isinstance(dropna, bool) or not isinstance(sort, bool):
+            raise ValueError("dropna and sort must be booleans")
+        if not pd.api.types.is_numeric_dtype(df[value].dtype) or pd.api.types.is_bool_dtype(
+            df[value].dtype
+        ):
+            raise UnsupportedDataError("group_mean requires a numeric, non-boolean value column")
+        grouped = df.groupby(keys, dropna=dropna, sort=sort, observed=True)
+        output = grouped[value].mean().reset_index()
+        group_ids = grouped.ngroup().to_numpy()
+        row_parents, cell_parents, groups = self._group_provenance(
+            df, keys, value, group_ids, len(output)
+        )
+        return self._story._add(
+            output,
+            name="Grouped mean",
+            operation="group_mean",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=row_parents,
+            cell_parents=cell_parents,
+            parameters={
+                "by": keys,
+                "value": value,
+                "dropna": dropna,
+                "sort": sort,
+                "groups": groups,
+                "excluded_rows": int(pd.isna(group_ids).sum()),
+            },
+        )
+
+    def group_count(
+        self,
+        *,
+        by: str | Sequence[str],
+        value: str,
+        dropna: bool,
+        sort: bool = False,
+        label: str = "Group and count",
+    ) -> StoryFrame:
+        """Count non-missing entries of a column per group; this is not the row count.
+
+        ``value`` may hold any supported scalar type; only its missing entries are
+        excluded. A group with no non-missing values counts as zero, not missing.
+        """
+        df = self.to_pandas()
+        keys = self._group_keys_and_value(df, by, value)
+        if not isinstance(dropna, bool) or not isinstance(sort, bool):
+            raise ValueError("dropna and sort must be booleans")
+        grouped = df.groupby(keys, dropna=dropna, sort=sort, observed=True)
+        output = grouped[value].count().reset_index()
+        group_ids = grouped.ngroup().to_numpy()
+        row_parents, cell_parents, groups = self._group_provenance(
+            df, keys, value, group_ids, len(output)
+        )
+        return self._story._add(
+            output,
+            name="Grouped count",
+            operation="group_count",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=row_parents,
+            cell_parents=cell_parents,
+            parameters={
+                "by": keys,
+                "value": value,
+                "dropna": dropna,
                 "sort": sort,
                 "groups": groups,
                 "excluded_rows": int(pd.isna(group_ids).sum()),

@@ -19,6 +19,7 @@
       return false;
     return cell.type !== "integer" || /^-?(?:0|[1-9][0-9]*)$/.test(cell.value);
   }
+  const aggregateScene = { group_sum: "sum", group_mean: "mean", group_count: "count" };
   function indexStory(data) {
     if (!data || data.format !== "framechoreo.story" || data.schema_version !== 1) {
       throw new Error("Unsupported story format");
@@ -34,6 +35,8 @@
       filter: 1,
       merge: 2,
       group_sum: 1,
+      group_mean: 1,
+      group_count: 1,
       sort: 1,
       select: 1,
       rename: 1,
@@ -244,10 +247,11 @@
         )
           invalid("inconsistent join counts");
       }
-      if (step.operation === "group_sum") {
+      if (Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)) {
         const p = step.parameters,
           parent = steps.get(step.parents[0]),
-          seen = new Set();
+          seen = new Set(),
+          hasMinCount = step.operation === "group_sum";
         if (
           !p ||
           !Array.isArray(p.by) ||
@@ -261,8 +265,9 @@
         if (
           typeof p.dropna !== "boolean" ||
           typeof p.sort !== "boolean" ||
-          !Number.isSafeInteger(p.min_count) ||
-          p.min_count < 0 ||
+          (hasMinCount
+            ? !Number.isSafeInteger(p.min_count) || p.min_count < 0
+            : p.min_count !== undefined) ||
           !step.columns.includes(p.value) ||
           p.by.includes(p.value)
         )
@@ -317,10 +322,10 @@
     for (const id of data.timeline) {
       const step = steps.get(id);
       if (!step) throw new Error("Missing timeline step");
-      if (step.operation === "group_sum") {
+      if (Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)) {
         const groupingStep = { ...step, presentation: { ...(step.presentation || {}), note: "" } };
         result.push({ kind: "group", step: groupingStep, table: steps.get(step.parents[0]) });
-        result.push({ kind: "sum", step, table: step });
+        result.push({ kind: aggregateScene[step.operation], step, table: step });
       } else result.push({ kind: step.operation, step, table: step });
     }
     return result;
@@ -486,6 +491,35 @@
           warning: true,
         };
     }
+    if (step.operation === "group_mean" && reference.column === p.value) {
+      const refs = row.cell_parents[p.value],
+        count = refs.length;
+      if (count === 0)
+        return cell.type === "missing"
+          ? { text: "There are no non-missing input values; pandas returns a missing average." }
+          : {
+              text: "The recorded result conflicts with its empty input references.",
+              warning: true,
+            };
+      if (cell.type === "missing")
+        return {
+          text: "pandas returned a missing average despite sufficient inputs. Inspect non-finite values and the dtype.",
+          warning: true,
+        };
+    }
+    if (step.operation === "group_count" && reference.column === p.value) {
+      const refs = row.cell_parents[p.value],
+        count = refs.length;
+      if (count === 0) return { text: "There are no non-missing input values; the count is 0." };
+      if (cell.type !== "integer" || BigInt(cell.value) !== BigInt(count))
+        return {
+          text:
+            "The recorded count conflicts with its " +
+            count +
+            " traced non-missing input references.",
+          warning: true,
+        };
+    }
     if (
       step.operation === "merge" &&
       row.parents.length === 1 &&
@@ -579,14 +613,13 @@
       ", sort=" +
       (p.sort ? "True" : "False") +
       ", observed=True)";
-    return scene.kind === "group"
-      ? group
-      : group +
-          "[" +
-          JSON.stringify(p.value) +
-          "].sum(min_count=" +
-          p.min_count +
-          ").reset_index()";
+    if (scene.kind === "group") return group;
+    const call = {
+      group_sum: "sum(min_count=" + p.min_count + ")",
+      group_mean: "mean()",
+      group_count: "count()",
+    }[scene.step.operation];
+    return group + "[" + JSON.stringify(p.value) + "]." + call + ".reset_index()";
   }
   const api = {
     indexStory,

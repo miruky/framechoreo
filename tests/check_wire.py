@@ -80,6 +80,19 @@ def main():
         joined = filled.merge(lookup, on="key")
         total = joined.group_sum(by="category", value="v", dropna=False)
         cases.append((story, [source, filled, lookup, joined, total]))
+    for operation in ["group_mean", "group_count"]:
+        for dropna in [False, True]:
+            story = DataStory()
+            source = story.table(
+                pd.DataFrame(
+                    {"key": ["a", "a", None, "b"], "v": pd.Series([2, 3, pd.NA, 7], dtype="Int64")}
+                ),
+                name="Source",
+            )
+            aggregate = getattr(source, operation)(by="key", value="v", dropna=dropna)
+            joined = source.merge(aggregate, on="key")
+            repeated = getattr(joined, operation)(by="key", value="v_y", dropna=dropna)
+            cases.append((story, [source, aggregate, joined, repeated]))
     contracts = []
     analysis = DataStory()
     source = analysis.table(

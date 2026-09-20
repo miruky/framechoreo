@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const m = require("../src/framechoreo/assets/model.js");
+const { fixture: harnessFixture } = require("./player-harness.cjs");
 const cell = (v) => ({ type: "integer", value: String(v), display: String(v) });
 const fixture = () => ({
   format: "framechoreo.story",
@@ -59,6 +60,36 @@ test("a group_sum has distinct grouping and summing scenes", () => {
   assert.deepEqual(
     m.scenes(fixture()).map((s) => s.kind),
     ["source", "group", "sum"],
+  );
+});
+test("group_mean and group_count have their own aggregation scene kind", () => {
+  assert.deepEqual(
+    m.scenes(harnessFixture(3, "group_mean")).map((s) => s.kind),
+    ["source", "filter", "group", "mean"],
+  );
+  assert.deepEqual(
+    m.scenes(harnessFixture(3, "group_count")).map((s) => s.kind),
+    ["source", "filter", "group", "count"],
+  );
+});
+test("group_mean and group_count describe pandas mean()/count(), not sum()", () => {
+  const meanScenes = m.scenes(harnessFixture(3, "group_mean"));
+  const countScenes = m.scenes(harnessFixture(3, "group_count"));
+  assert.match(m.description(meanScenes.at(-1)), /\.mean\(\)\.reset_index\(\)$/);
+  assert.match(m.description(countScenes.at(-1)), /\.count\(\)\.reset_index\(\)$/);
+  assert.doesNotMatch(m.description(meanScenes.at(-1)), /min_count/);
+  assert.doesNotMatch(m.description(countScenes.at(-1)), /min_count/);
+});
+test("traceCell agrees on group_mean and group_count value origins", () => {
+  const mean = harnessFixture(3, "group_mean");
+  assert.deepEqual(
+    m.traceCell(mean, { step: "g", row: 0, column: "v" }).map((x) => x.cell.value),
+    ["1", "2", "3"],
+  );
+  const count = harnessFixture(3, "group_count");
+  assert.deepEqual(
+    m.traceCell(count, { step: "g", row: 0, column: "v" }).map((x) => x.cell.value),
+    ["1", "2", "3"],
   );
 });
 test("origins retain exact values and order", () => {

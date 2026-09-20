@@ -33,10 +33,18 @@ python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 生成した説明が再生できます。`classroom.py` は日本語の題材です。
 完全なコード例は[英語README](README.md#a-complete-story)にあります。
 
+`python examples/motion_showcase.py` では、抽出・並べ替え・結合・集計を説明する
+日本語デモ `examples/generated/motion-showcase.html` を生成できます。
+結合元のカードから結果のセルへ値が移動し、集計では欠損値を除いた入力が
+同じ色・グループ番号の結果へ集まります。`Replay the movement` で動きを見直し、
+`Python operation` で処理コードを開けます。動かすのは画面内の値に限り、
+すべての入力は結果のセルから調べられます。
+
 ## 主な使い方
 
 `DataStory.table()` でDataFrameを登録し、戻ってくる `StoryFrame` に対して
-`filter_rows()`、`merge()`、`group_sum()` を実行します。
+`filter_rows()`、`merge()`、`group_sum()`・`group_mean()`・`group_count()` を実行します。
+`group_count()` は列ごとの非欠損値の件数であり、行数ではありません。
 `to_pandas()` は記録した結果のコピー、`explain(行位置, 列名)` は元の値の一覧を返します。
 行位置は0から数えます。画面では読みやすく1から表示します。
 
@@ -91,7 +99,8 @@ python examples/large_analysis.py --rows 50000
 ## 対応範囲
 
 - pandas 2.2.3以上、3.1未満を依存範囲としています。
-- 行フィルター、inner/left結合、数値列のグループ別合計に対応します。
+- 行フィルター、inner/left結合、数値列のグループ別合計・平均、列ごとの非欠損値の件数に対応します。
+  平均は非欠損の入力が無いグループを欠損のまま返し、`min_count`の設定はありません。
 - `calculate()`で行ごとの数値計算、`sort_values()`で安定した並べ替えができます。
 - `select_columns()`と`rename_columns()`で列を整理できます。
 - 結合は `one_to_one` または `many_to_one` を検査します。
