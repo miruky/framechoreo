@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .encoding import encode_cell, validate_text
+from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 
 VERSION = "0.1.0"
@@ -60,6 +60,12 @@ def _text(value: str, name: str, limit: int = 400) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(f"{name} must be a nonempty string of at most {limit} characters")
     return validate_text(value)
+
+
+def _positive_integer(value: int, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
 
 
 def _keys(value: str | Sequence[str], columns: pd.Index, *, allow_empty: bool = False) -> list[str]:
@@ -119,15 +125,7 @@ class DataStory:
         max_steps: int = 20,
         max_export_bytes: int = 2_000_000,
     ) -> None:
-        self.title = _text(title, "title", 200)
-        for name, limit in {
-            "max_rows": max_rows,
-            "max_columns": max_columns,
-            "max_steps": max_steps,
-            "max_export_bytes": max_export_bytes,
-        }.items():
-            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-                raise ValueError(f"{name} must be a positive integer")
+        self.title = title
         self.max_rows = max_rows
         self.max_columns = max_columns
         self.max_steps = max_steps
@@ -135,11 +133,61 @@ class DataStory:
         self._steps: list[_Step] = []
         self._presentations: dict[str, dict[str, Any]] = {}
 
+    @property
+    def title(self) -> str:
+        return self._title
+
+    @title.setter
+    def title(self, value: str) -> None:
+        self._title = _text(value, "title", 200)
+
+    @property
+    def max_rows(self) -> int:
+        return self._max_rows
+
+    @max_rows.setter
+    def max_rows(self, value: int) -> None:
+        self._max_rows = _positive_integer(value, "max_rows")
+
+    @property
+    def max_columns(self) -> int:
+        return self._max_columns
+
+    @max_columns.setter
+    def max_columns(self, value: int) -> None:
+        self._max_columns = _positive_integer(value, "max_columns")
+
+    @property
+    def max_steps(self) -> int:
+        return self._max_steps
+
+    @max_steps.setter
+    def max_steps(self, value: int) -> None:
+        self._max_steps = _positive_integer(value, "max_steps")
+
+    @property
+    def max_export_bytes(self) -> int:
+        return self._max_export_bytes
+
+    @max_export_bytes.setter
+    def max_export_bytes(self, value: int) -> None:
+        self._max_export_bytes = _positive_integer(value, "max_export_bytes")
+
     def _step(self, step_id: str) -> _Step:
         for step in self._steps:
             if step.id == step_id:
                 return step
         raise ValueError("Unknown step")
+
+    def _ancestors(self, result_id: str | None) -> set[str]:
+        required: set[str] = set()
+        pending = [result_id] if result_id is not None else []
+        while pending:
+            sid = pending.pop()
+            if sid not in required:
+                required.add(sid)
+                pending.extend(self._step(sid).parents)
+        return required
 
     def _add(
         self,
@@ -159,7 +207,9 @@ class DataStory:
             raise CaptureLimitError("Table exceeds max_rows or max_columns; data was not sampled")
         if len(self._steps) >= self.max_steps:
             raise CaptureLimitError("Story exceeds max_steps")
-        if not frame.columns.is_unique or not all(isinstance(c, str) and c for c in frame.columns):
+        if not all(isinstance(c, str) and c.strip() for c in frame.columns):
+            raise UnsupportedDataError("Columns must have unique, nonempty string names")
+        if not frame.columns.is_unique:
             raise UnsupportedDataError("Columns must have unique, nonempty string names")
         if len(frame.columns) == 0:
             raise UnsupportedDataError("At least one column is required")
@@ -228,13 +278,7 @@ class DataStory:
     def to_dict(self, *, result: StoryFrame | None = None) -> dict[str, Any]:
         """Return detached display data for the result and its ancestors."""
         result_id = self._result(result)
-        required: set[str] = set()
-        pending = [result_id] if result_id else []
-        while pending:
-            sid = pending.pop()
-            if sid not in required:
-                required.add(sid)
-                pending.extend(self._step(sid).parents)
+        required = self._ancestors(result_id)
         timeline = []
         sid = result_id
         while sid is not None:
@@ -334,8 +378,10 @@ class DataStory:
         }
 
     def _repr_html_(self) -> str:
-        from .export import notebook_html
+        from .export import notebook_html, notebook_placeholder
 
+        if not self._steps:
+            return notebook_placeholder(self.title)
         return notebook_html(self.to_html(), self.title)
 
 
@@ -343,8 +389,15 @@ class StoryFrame:
     """An immutable recorded step, with a small explicit operation surface."""
 
     def __init__(self, story: DataStory, step_id: str) -> None:
+        if not isinstance(story, DataStory):
+            raise ValueError("story must be a DataStory")
+        story._step(step_id)
         self._story = story
-        self.step_id = step_id
+        self._step_id = step_id
+
+    @property
+    def step_id(self) -> str:
+        return self._step_id
 
     @property
     def _snapshot(self) -> _Step:
@@ -361,10 +414,19 @@ class StoryFrame:
         label: str = "Filter rows",
     ) -> StoryFrame:
         df = self.to_pandas()
+        before = tuple(
+            tuple(cell_signature(v) for v in row) for row in df.itertuples(index=False, name=None)
+        )
         mask = predicate(df) if callable(predicate) else predicate
         try:
             pd.testing.assert_frame_equal(df, self._snapshot.frame, check_exact=True)
-        except AssertionError as exc:
+            after = tuple(
+                tuple(cell_signature(v) for v in row)
+                for row in df.itertuples(index=False, name=None)
+            )
+            if before != after:
+                raise ValueError("Recorded cell representation changed")
+        except (AssertionError, TypeError, ValueError) as exc:
             raise ValueError("Filter predicate must not mutate its input") from exc
         if isinstance(mask, pd.Series):
             if not mask.index.equals(df.index):
@@ -490,8 +552,12 @@ class StoryFrame:
             raise ValueError("value must name a column outside the grouping keys")
         if not isinstance(dropna, bool) or not isinstance(sort, bool):
             raise ValueError("dropna and sort must be booleans")
-        if isinstance(min_count, bool) or not isinstance(min_count, int) or min_count < 0:
-            raise ValueError("min_count must be a nonnegative integer")
+        if (
+            isinstance(min_count, bool)
+            or not isinstance(min_count, int)
+            or not 0 <= min_count <= 2**53 - 1
+        ):
+            raise ValueError("min_count must be an integer from 0 through 2**53 - 1")
         if not pd.api.types.is_numeric_dtype(df[value].dtype) or pd.api.types.is_bool_dtype(
             df[value].dtype
         ):
@@ -551,12 +617,13 @@ class StoryFrame:
         if isinstance(max_sources, bool) or not isinstance(max_sources, int) or max_sources < 1:
             raise ValueError("max_sources must be a positive integer")
         pending = [_CellRef(self.step_id, row, column)]
+        traversal_limit = max_sources * len(self._story._ancestors(self.step_id))
         origins = []
         visited = 0
         while pending:
             ref = pending.pop()
             visited += 1
-            if visited > max_sources * self._story.max_steps:
+            if visited > traversal_limit:
                 raise CaptureLimitError("Lineage traversal exceeds the limit")
             step = self._story._step(ref.step)
             if step.operation == "source":

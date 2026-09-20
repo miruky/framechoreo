@@ -109,6 +109,9 @@ errors rather than sample silently. The player initially shows up to 12 rows;
 Origin lists are paginated in groups of 50, and the complete right-hand join input
 can be inspected. Pause freezes row motion and keeps the remaining scene time;
 resuming and changing speed preserve progress.
+**Clear selection** removes the inspection highlights. Sum explanations report
+insufficient non-missing inputs and flag recorded integer sums that differ from
+exact addition, helping identify dtype overflow while preserving the pandas result.
 
 ## What the file contains
 
@@ -132,6 +135,10 @@ embedded and displayed as text. Input callbacks are trusted Python code, not a s
 - Nested objects, bytes, complex numbers, duplicate columns, and non-string column
   names are rejected. DataFrame index labels are preserved by `to_pandas()` but
   are not exported as display columns; source positions identify rows.
+- NumPy datetimes keep their native text precision, including sub-nanosecond units.
+  All displayed strings, including column names and decimal representations, are
+  bounded to 20,000 Unicode characters. Grouped `min_count` is bounded to `2**53 - 1`
+  so its displayed setting remains exact in JavaScript.
 - Scalar or dictionary filter masks are rejected; supply one boolean per row.
   Text must be valid Unicode for UTF-8 export. Missing values carry a visible
   marker, and selecting a cell reveals its encoded value type.
@@ -152,6 +159,17 @@ python examples/classroom.py
 The generated HTML files appear in `examples/generated/`. Every example uses
 synthetic data. See [validation scope](docs/validation.md) for the environments and
 checks performed on the prepared release.
+
+For a complete notebook example, install the optional notebook tools from the
+source checkout and open [examples/notebook.ipynb](examples/notebook.ipynb):
+
+```sh
+python -m pip install ".[notebook]"
+jupyter lab examples/notebook.ipynb
+```
+
+The empty story displays a short hint; a recorded result displays the interactive
+player. Run the cells in the Python environment where FrameChoreo is installed.
 
 ## Related work
 

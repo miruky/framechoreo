@@ -266,6 +266,7 @@ p {
   display: grid;
   gap: 0;
   border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
   font-size: 12px;
   font-weight: 600;
   min-height: 36px;
@@ -427,6 +428,25 @@ p {
   color: var(--muted);
   margin-bottom: 8px;
   overflow-wrap: anywhere;
+}
+.inspector-titlebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.inspector-titlebar .inspector-head {
+  margin-bottom: 0;
+  min-width: 0;
+}
+.clear-selection {
+  flex-shrink: 0;
+}
+.inspector .calculation-note {
+  padding: 9px 11px;
+  border-left: 3px solid var(--accent);
+  background: var(--soft);
+  color: var(--ink);
 }
 .selected-value {
   white-space: pre-wrap;

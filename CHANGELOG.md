@@ -2,6 +2,14 @@
 
 ## 0.1.0 — Unreleased
 
+- Preserve sub-nanosecond NumPy datetime text and reject representation-changing predicates.
+- Validate live configuration, make frame identities read-only, and separate traversal budgets from capture caps.
+- Bound header/decimal display text and safely represent the minimum-count setting.
+- Check recorded result, types, references, and operation counts together.
+- Explain missing sums and possible integer overflow; add selection clearing and aligned table columns.
+- Use indexed highlighting for large provenance lists while retaining multiplicity.
+- Add a runnable notebook and automated isolated-kernel verification.
+
 - Detach index, column, and categorical buffers; reject even tiny predicate mutations.
 - Correct NumPy duration and missing-value encodings, and reject invalid Unicode early.
 - Require boolean overwrite flags and positional boolean masks; validate presentation options.

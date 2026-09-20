@@ -146,7 +146,38 @@
     const origins = el("div", "origins"),
       originPager = el("div", "origin-pager"),
       explanation = el("div", "explanation");
-    inspector.append(inspectorHead, selectedValue, selectedType, origins, originPager, explanation);
+    const clearSelection = button(
+      "Clear selection",
+      () => {
+        settleAnimations();
+        const target = board.querySelector(".cell.selected") || caption;
+        state.selection = null;
+        state.originPage = 0;
+        inspectorHead.textContent = "SELECT A VALUE";
+        selectedValue.textContent = "Select any cell to trace its value inputs.";
+        selectedType.textContent = "";
+        origins.replaceChildren();
+        originPager.replaceChildren();
+        explanation.textContent = "";
+        explanation.classList.remove("calculation-note");
+        clearSelection.hidden = true;
+        refreshSelection();
+        reveal(target);
+      },
+      "text-button clear-selection",
+    );
+    clearSelection.dataset.action = "clear-selection";
+    clearSelection.hidden = true;
+    const inspectorTitle = el("div", "inspector-titlebar");
+    inspectorTitle.append(inspectorHead, clearSelection);
+    inspector.append(
+      inspectorTitle,
+      selectedValue,
+      selectedType,
+      origins,
+      originPager,
+      explanation,
+    );
     const disclosure = el("details", "disclosure");
     disclosure.append(
       el("summary", "", "About the data in this file"),
@@ -181,6 +212,12 @@
       rowAnimations.forEach((animation) => {
         if (animation.playState === "running") animation.pause();
       });
+    }
+    function settleAnimations() {
+      rowAnimations.forEach((animation) => animation.cancel());
+      rowAnimations = [];
+      animationNodes.forEach((node) => node.remove());
+      animationNodes = [];
     }
     function schedule() {
       clearTimeout(timer);
@@ -230,18 +267,11 @@
     }
     function isSelected(step, row, column) {
       if (!state.selection) return false;
-      if (
-        state.selection.step === step &&
-        state.selection.row === row &&
-        state.selection.column === column
-      )
-        return true;
-      return state.selection.origins.some(
-        (o) => o.step === step && o.row === row && o.column === column,
-      );
+      return state.selection.keys.has(model.cellKey(step, row, column));
     }
     function selectCell(step, row, column) {
       stop();
+      settleAnimations();
       const tableData = steps.get(step),
         cell = tableData.rows[row].cells[tableData.columns.indexOf(column)];
       state.selection = null;
@@ -250,15 +280,24 @@
         model.tableLabel(data, tableData) + " · row " + (row + 1) + " · " + column;
       selectedValue.textContent = cell.display;
       selectedType.textContent = "Type: " + cell.type;
+      clearSelection.hidden = false;
+      explanation.classList.remove("calculation-note");
       origins.replaceChildren();
       originPager.replaceChildren();
       try {
         const inputs = model.traceCell(data, { step, row, column });
-        state.selection = { step, row, column, origins: inputs };
+        const keys = new Set(
+          inputs.map((input) => model.cellKey(input.step, input.row, input.column)),
+        );
+        keys.add(model.cellKey(step, row, column));
+        state.selection = { step, row, column, origins: inputs, keys };
         renderOrigins();
-        explanation.textContent = inputs.length
+        const details = model.cellExplanation(steps, { step, row, column });
+        const instructions = inputs.length
           ? "Select an input above to inspect its source table. Repeated inputs are retained."
-          : "No source value inputs: this can be an unmatched join cell or a sum with no non-missing values. Check the operation settings.";
+          : "No raw source value inputs were recorded for this cell.";
+        explanation.textContent = details.text ? details.text + " " + instructions : instructions;
+        explanation.classList.toggle("calculation-note", Boolean(details.warning));
       } catch (error) {
         origins.replaceChildren();
         explanation.textContent = error.message;
@@ -481,7 +520,7 @@
       const allRows = model.orderedRows(scene),
         rows = state.all ? allRows : allRows.slice(0, 12);
       const grid = "46px repeat(" + tableData.columns.length + ", minmax(100px, 1fr))";
-      const minWidth = 46 + tableData.columns.length * 100;
+      const minWidth = 49 + tableData.columns.length * 100;
       table.style.minWidth = minWidth + "px";
       columnHead.style.gridTemplateColumns = grid;
       const numberHead = el("div", "", "Row");
@@ -510,6 +549,7 @@
       for (const entry of geometry.items) {
         if (entry.band) {
           const band = el("div", "group-band", entry.label);
+          band.title = entry.label;
           band.style.top = entry.y + "px";
           band.style.borderLeftColor =
             entry.group < 0 ? "var(--line)" : "var(--g" + (entry.group % 6) + ")";

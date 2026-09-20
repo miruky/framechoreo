@@ -5,6 +5,7 @@ const cell = (v) => ({ type: "integer", value: String(v), display: String(v) });
 const fixture = () => ({
   format: "framechoreo.story",
   schema_version: 1,
+  result: "g",
   timeline: ["s", "g"],
   steps: [
     {
@@ -48,6 +49,7 @@ const fixture = () => ({
         dropna: false,
         sort: false,
         min_count: 1,
+        excluded_rows: 0,
         groups: [{ output_row: 0, input_rows: [0, 1] }],
       },
     },

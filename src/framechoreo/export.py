@@ -70,3 +70,10 @@ def notebook_html(text: str, title: str) -> str:
         f'title="{html.escape(title, quote=True)}" '
         f'srcdoc="{html.escape(text, quote=True)}"></iframe>'
     )
+
+
+def notebook_placeholder(title: str) -> str:
+    return (
+        '<div role="note"><strong>' + html.escape(title) + "</strong>"
+        "<p>Add a table with <code>story.table(df)</code> to start this story.</p></div>"
+    )

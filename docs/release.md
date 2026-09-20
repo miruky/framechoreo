@@ -54,3 +54,6 @@ python -m build
 python -m twine check dist/*
 python tests/check_distribution.py
 ```
+
+For the notebook path, install `.[notebook]`, run `python tests/check_notebook.py`,
+and open `examples/notebook.ipynb` in JupyterLab to inspect the embedded controls.

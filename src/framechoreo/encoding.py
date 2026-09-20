@@ -11,7 +11,9 @@ from .errors import CaptureLimitError, UnsupportedDataError
 
 
 def validate_text(value: str) -> str:
-    """Reject unpaired surrogates before they can make UTF-8 export fail."""
+    """Bound display strings and reject text that cannot be exported as UTF-8."""
+    if len(value) > 20_000:
+        raise CaptureLimitError("Display text exceeds the 20,000-character limit")
     try:
         value.encode("utf-8")
     except UnicodeEncodeError as exc:
@@ -28,14 +30,24 @@ def encode_cell(value: Any) -> dict[str, Any]:
         return {"type": "missing", "value": None, "display": "∅"}
     if isinstance(value, Decimal) and value.is_nan():
         return {"type": "missing", "value": None, "display": "∅"}
+    if isinstance(value, np.datetime64):
+        # Converting to Timestamp can silently discard sub-nanosecond digits.
+        text = validate_text(str(value))
+        return {"type": "datetime", "value": text, "display": text}
     # NumPy timedelta64 is also an np.integer; handle its actual meaning first.
     if isinstance(value, (pd.Timedelta, dt.timedelta, np.timedelta64)):
-        text = pd.Timedelta(value).isoformat()
+        try:
+            text = pd.Timedelta(value).isoformat()
+        except (ValueError, OverflowError) as exc:
+            raise UnsupportedDataError(
+                "Duration must be representable by pandas without ambiguous calendar units"
+            ) from exc
         return {"type": "duration", "value": text, "display": text}
     if isinstance(value, (bool, np.bool_)):
         return {"type": "boolean", "value": bool(value), "display": str(bool(value))}
     if isinstance(value, (int, np.integer)):
-        return {"type": "integer", "value": str(value), "display": str(value)}
+        text = validate_text(str(value))
+        return {"type": "integer", "value": text, "display": text}
     if isinstance(value, (float, np.floating)):
         text = str(value) if isinstance(value, np.floating) else repr(value)
         return {"type": "float", "value": text, "display": text}
@@ -44,13 +56,17 @@ def encode_cell(value: Any) -> dict[str, Any]:
             raise CaptureLimitError("A text cell exceeds the 20,000-character limit")
         return {"type": "string", "value": validate_text(value), "display": value}
     if isinstance(value, Decimal):
-        return {"type": "decimal", "value": str(value), "display": str(value)}
+        text = validate_text(str(value))
+        return {"type": "decimal", "value": text, "display": text}
     if isinstance(value, (pd.Timestamp, dt.datetime, dt.date, dt.time)):
         text = value.isoformat()
         return {"type": "datetime", "value": text, "display": text}
-    if isinstance(value, np.datetime64):
-        return encode_cell(pd.Timestamp(value))
     raise UnsupportedDataError(
         f"Unsupported cell type: {type(value).__name__}. "
         "Use scalar values; nested objects are not captured."
     )
+
+
+def cell_signature(value: Any) -> tuple[Any, ...]:
+    """Distinguish representations that numeric equality alone treats as equal."""
+    return type(value), encode_cell(value), getattr(value, "fold", None)

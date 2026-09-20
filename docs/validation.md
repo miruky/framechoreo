@@ -1,6 +1,6 @@
 # Validation scope for 0.1.0
 
-Local checks were performed on macOS on 2026-09-20. All **57 Python tests** passed
+Local checks were performed on macOS on 2026-09-20. All **80 Python tests** passed
 in each environment below. The suite configures up to 240 generated examples across three
 property tests, plus full DataFrame comparisons and independent source-membership
 checks.
@@ -24,16 +24,20 @@ The covered behaviors include:
 - Source-copy isolation, failed-operation atomicity, and capture limits.
 - Detached axis/category buffers, exact predicate-mutation checks, and unambiguous masks.
 - NumPy durations, missing-value variants, Unicode validation, and UTF-8 byte limits.
+- Signed zero, Decimal representation, datetime fold, and sub-nanosecond datetime precision.
+- Validated live settings, stable step identities, and traversal after changing capture caps.
 - Presentation annotations that do not change data or provenance.
 - Script-boundary escaping, self-contained assets, notebook iframe markup, and file replacement guards.
 
-All **25 JavaScript tests** passed with Node.js 25.9.0. Model tests cover scene
+All **39 JavaScript tests** passed with Node.js 25.9.0. Model tests cover scene
 construction, source resolution, multiplicity, malformed references, limits,
 annotation timing, and distinct labels for missing values and duplicate names.
 DOM tests use jsdom and a controlled clock to exercise the actual player controls:
 play/pause/resume, remaining hold time, speed changes, animation pausing, focus,
 origin pagination, and complete right-input inspection. They do not measure browser
-layout. The cross-language check compares source inputs from Python and JavaScript.
+layout. Additional cases cover selection clearing, calculation explanations,
+record/result consistency, safe counts, and Unicode character limits. The cross-language
+check compares all 74 selected cells in its fixtures between Python and JavaScript.
 
 The generated sales story was also opened in the Codex in-app Chromium browser.
 Its computed totals, source-cell inspection, play/pause, backward navigation, and
@@ -48,6 +52,12 @@ The follow-up inspection also reached the 60th source input through pagination,
 opened all 15 rows of a filtered right-hand input, confirmed focus on a requested
 source cell, distinguished a missing key from the literal string `∅`, and checked
 long labels in a 390-pixel light-themed viewport.
+
+JupyterLab 4.6.3 / nbclient 0.11.0 / Python 3.13.14 were also exercised. The shipped
+notebook ran in an isolated kernel, displayed the empty-story hint and player iframe,
+and passed its result assertions. In the actual JupyterLab frontend, the sum 27
+resolved to inputs 12 and 15; source inspection and selection clearing worked.
+This verifies that frontend/environment combination, not every notebook host.
 
 The distribution check audits wheel/sdist contents and installs a wheel in a new
 virtual environment outside the checkout. It runs the README example with runtime

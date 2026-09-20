@@ -9,8 +9,13 @@ DataStory(title="A data story", *, max_rows=200, max_columns=12,
 
 Limits are positive integers. Source tables count as recorded steps. Exceeding a
 limit raises `CaptureLimitError`; capture does not silently sample. A text cell is
-limited to 20,000 characters. `max_export_bytes` covers UTF-8 JSON data, not bundled
+limited to 20,000 characters; the same bound applies to column names and other
+displayed scalar strings. `max_export_bytes` covers UTF-8 JSON data, not bundled
 player assets.
+
+The title and limits can be reassigned and are validated on each assignment. A
+failed assignment preserves the previous value. Lowering capture limits does not
+change existing records or their lineage traversal budget.
 
 ### table
 
@@ -28,6 +33,9 @@ but is not automatically published as a displayed column.
 
 Axis buffers and categorical dictionaries are detached as well as ordinary data.
 Unpaired Unicode surrogates are rejected during capture, before a snapshot is added.
+Whitespace-only column names are rejected. NumPy datetime scalars retain their
+native string precision rather than being converted through pandas Timestamp;
+FrameChoreo records the values already stored in the supplied DataFrame.
 
 ### annotate
 
@@ -44,6 +52,8 @@ appears only in the summing scene, once the result exists.
 Playback first holds the current scene. Pause freezes active row animations and
 retains the remaining hold time. Resuming or changing speed continues from that
 point. Manual scene navigation resets the selected scene's hold time.
+Selecting a value settles the visual transition before inspection, so temporary
+animation rows do not remain beside the recorded result.
 
 ### Export methods
 
@@ -73,6 +83,8 @@ JSON is encoded incrementally and stops once its byte limit is exceeded.
 
 In Jupyter, `_repr_html_()` embeds the same player in a sandboxed `srcdoc` iframe.
 Notebook trust and the host's iframe policy can affect rendering.
+Displaying an empty story shows a short start hint; explicit HTML export still
+requires a recorded table.
 
 ## StoryFrame
 
@@ -89,7 +101,8 @@ positions. A nullable boolean mask treats missing entries as false, like pandas.
 Integers or strings are not coerced into booleans.
 Scalar booleans, dictionaries, and unordered sets are rejected. Missing mask values
 require a nullable boolean dtype. Input comparison is exact, including small
-floating-point changes.
+floating-point changes. Cell type and representation are compared too, so signed
+zero, Decimal scale, and datetime fold changes cannot hide behind numeric equality.
 
 This tracks retained rows. It does not infer every input cell accessed inside an
 arbitrary predicate. External side effects of a user callback are the caller's
@@ -132,12 +145,19 @@ total = frame.group_sum(
 `by` is one column or a sequence. `value` is a distinct numeric, non-boolean column.
 `dropna` is required: true excludes missing group keys, false retains them.
 `observed=True` is always used for categorical grouping. `min_count` is a
-nonnegative integer. All-missing groups remain missing with the default `min_count=1`.
+nonnegative integer no greater than `2**53 - 1`, so the player can show the setting
+exactly. All-missing groups remain missing with the default `min_count=1`.
 
 The grouping scene presents member rows; the summing scene presents the computed
 result. Summed cells trace non-missing numeric value inputs. Group-key cells trace
 their input key cells. These are value inputs, not a proof of every possible causal
 dependency of a calculation.
+
+The inspector explains results with too few non-missing inputs and the zero returned
+from empty value inputs with `min_count=0`. For integer sums it can compare recorded
+inputs using exact integer addition and flag a possible dtype overflow. These
+focused diagnostics preserve the recorded pandas value and are not a general
+verification of arbitrary calculations.
 
 ### to_pandas and explain
 
@@ -157,6 +177,9 @@ per page, with controls to visit every recorded origin. Inspecting an origin rev
 and focuses its source cell. Right-hand join inputs can be opened in full; an
 intermediate right input is identified as an input rather than as an original source.
 Duplicate source names receive distinct display labels without changing source IDs.
+`StoryFrame.step_id` is read-only. Constructing a handle for an unknown step fails
+immediately. The player can clear its current selection, and uses a lookup set for
+highlights while keeping repeated origins in the displayed provenance list.
 
 ## Errors
 

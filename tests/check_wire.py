@@ -2,8 +2,10 @@
 
 import json
 import subprocess
+from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from framechoreo import DataStory
@@ -36,6 +38,17 @@ def main():
     )
     result = source.group_sum(by="__proto__", value="constructor", dropna=False)
     cases.append((special, [source, result]))
+    precise = DataStory()
+    source = precise.table(
+        pd.DataFrame(
+            {
+                "time": pd.Series([np.datetime64(1500, "ps")], dtype=object),
+                "zero": [-0.0],
+                "decimal": [Decimal("1.00")],
+            }
+        )
+    )
+    cases.append((precise, [source, source.filter_rows([True])]))
     contracts = []
     for story, frames in cases:
         checks = []
@@ -52,10 +65,13 @@ def main():
                         }
                         for o in frame.explain(row, column)
                     ]
+                    limit = max(1, len(inputs))
+                    assert len(frame.explain(row, column, max_sources=limit)) == len(inputs)
                     checks.append(
                         {
                             "reference": {"step": frame.step_id, "row": row, "column": column},
                             "inputs": inputs,
+                            "max_sources": limit,
                         }
                     )
         contracts.append({"data": story.to_dict(), "checks": checks})

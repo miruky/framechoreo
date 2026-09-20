@@ -44,6 +44,9 @@ python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 結合相手の表も全行を開けます。元のセルへ移動すると、そのセルまで画面が移り、
 キーボードの操作位置も引き継ぎます。欠損には表示を添え、文字列の「∅」と区別します。
 
+「Clear selection」で選択を解除できます。合計が欠損になる場合は必要な入力件数を
+説明し、整数の正確な足し算とpandasの結果が異なる場合は桁あふれの可能性を示します。
+
 説明の注記・再生時の間・強調する列は、計算と分けて指定できます。
 
 ```python
@@ -88,3 +91,15 @@ DataFrameのindexを行の識別子に使わないため、重複したindexも�
 先行するPandas Tutor、Datamations、ipyvizzuとの違いは英語READMEに記載しています。
 
 MIT License。Copyright © 2026 miruky。
+
+## ノートブックで試す
+
+ソースから任意のノートブック用ツールを追加し、[サンプル](examples/notebook.ipynb)を開けます。
+
+```sh
+python -m pip install ".[notebook]"
+jupyter lab examples/notebook.ipynb
+```
+
+FrameChoreoを導入したPython環境のカーネルを使います。空のstoryには開始方法が表示され、
+記録後はノートブック内で再生、値の追跡、選択の解除まで操作できます。

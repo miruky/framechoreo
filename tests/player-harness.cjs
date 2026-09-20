@@ -50,7 +50,7 @@ function fixture(count = 3) {
         columns: ["key", "v"],
         rows: filteredRows,
         parents: ["s"],
-        parameters: { removed_rows: 0 },
+        parameters: { removed_rows: 0, selected_rows: sourceRows.map((row) => row.position) },
         presentation: { hold_ms: 2000 },
       },
       {

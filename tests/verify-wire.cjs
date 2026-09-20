@@ -5,9 +5,9 @@ const contracts = JSON.parse(fs.readFileSync(0, "utf8"));
 let cells = 0;
 for (const { data, checks } of contracts) {
   model.scenes(data);
-  for (const { reference, inputs } of checks) {
+  for (const { reference, inputs, max_sources } of checks) {
     const actual = model
-      .traceCell(data, reference)
+      .traceCell(data, reference, max_sources)
       .map(({ step, row, column, cell }) => ({ step, row, column, cell }));
     assert.deepEqual(actual, inputs);
     cells++;

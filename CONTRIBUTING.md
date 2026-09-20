@@ -61,6 +61,11 @@ archive contents against the source, creates a separate virtual environment,
 installs the wheel and runtime dependencies, then runs the README example with
 runtime connections blocked. Dependency installation itself needs package access.
 
+For notebook changes, install `.[dev,notebook]` and run `python tests/check_notebook.py`.
+This executes the shipped example in a temporary kernel, checks the rich outputs,
+and shuts down the kernel. Inspect the iframe in JupyterLab as well: a kernel test
+does not establish frontend rendering or interaction behavior.
+
 Keep local caches, private datasets, generated research notes, and credentials out
 of patches. Describe verification honestly and distinguish checks you ran from
 checks configured to run later. Contributors remain responsible for tool-assisted

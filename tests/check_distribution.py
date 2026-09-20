@@ -53,9 +53,13 @@ def main() -> None:
             "tests/test_integrity.py",
             "tests/check_wire.py",
             "tests/check_distribution.py",
+            "tests/check_notebook.py",
+            "tests/test_deep_contracts.py",
+            "tests/player-integrity.test.cjs",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
+            "examples/notebook.ipynb",
             "docs/api.md",
             "LICENSE",
         ]:
