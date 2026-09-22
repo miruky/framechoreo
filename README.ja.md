@@ -12,7 +12,7 @@
 
 ## インストール
 
-初回公開の準備段階です。PyPIへ公開済みとは限りません。
+1.0.0rc1のローカル候補版です。まだ公開していません。
 Python 3.11以上で、ソースのルートから実行します。
 
 ```sh
@@ -23,7 +23,7 @@ python examples/sales_story.py
 配布用wheelから入れる場合は次のとおりです。
 
 ```sh
-python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc1-py3-none-any.whl
 ```
 
 同じ版番号の未公開wheelを以前に導入している場合は、上のコマンドに
@@ -37,7 +37,7 @@ python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
 日本語デモ `examples/generated/motion-showcase.html` を生成できます。
 結合元のカードから結果のセルへ値が移動し、集計では欠損値を除いた入力が
 同じ色・グループ番号の結果へ集まります。`Replay the movement` で動きを見直し、
-`Python operation` で処理コードを開けます。動かすのは画面内の値に限り、
+`処理の内容` で処理コードを開けます。動かすのは画面内の値に限り、
 すべての入力は結果のセルから調べられます。
 
 ## 主な使い方
@@ -99,7 +99,7 @@ python examples/large_analysis.py --rows 50000
 ## 対応範囲
 
 - pandas 2.2.3以上、3.1未満を依存範囲としています。
-- 行フィルター、inner/left結合、数値列のグループ別合計・平均、列ごとの非欠損値の件数に対応します。
+- 行の抽出、4種類の結合、前処理、縦横変換、名前付きの複数指標の集計に対応します。
   平均は非欠損の入力が無いグループを欠損のまま返し、`min_count`の設定はありません。
 - `calculate()`で行ごとの数値計算、`sort_values()`で安定した並べ替えができます。
 - `select_columns()`と`rename_columns()`で列を整理できます。
@@ -111,7 +111,7 @@ python examples/large_analysis.py --rows 50000
 - フィルターには1行につき一つの真偽値を渡します。単独の真偽値や辞書は受け付けません。
 - 行名・列名・カテゴリのラベルもコピーし、入力の変更から記録を保護します。
 
-Polars、pivot、melt、多対多結合、任意の集計、GIF/MP4出力は未対応です。
+Polars、多対多・cross結合、任意の集計コールバック、GIF/MP4出力は対象外です。
 DataFrameのindexを行の識別子に使わないため、重複したindexも区別します。
 数値計算はpandasの規則に従います。表示用の丸めで計算を変えることはありません。
 
@@ -146,3 +146,31 @@ jupyter lab examples/notebook.ipynb
 
 FrameChoreoを導入したPython環境のカーネルを使います。空のstoryには開始方法が表示され、
 記録後はノートブック内で再生、値の追跡、選択の解除まで操作できます。
+
+## 1.0候補のワークフロー
+
+`drop_missing`・`fill_missing`・`drop_duplicates`による前処理、`astype`・`to_numeric`・
+`to_datetime`による型変換、`string_transform`による文字の整形、`concat`による縦結合、
+`melt`・`pivot`による縦横変換を追加しています。`group_agg`では、合計・平均・最小・最大・
+中央値・非欠損の件数・ユニーク値数を、好きな結果列名でまとめられます。
+
+結合はleft/inner/right/outerと、左右で異なるキー名に対応します。多対多結合は対象外です。
+
+```sh
+python examples/retail_workflow.py
+python examples/reshape_workflow.py
+```
+
+生成先は`examples/generated/retail-workflow.html`と`reshape-workflow.html`です。
+前者は2か月の注文を整えて6指標のレポートを作り、後者は月別の表を縦長・横長に変えて比較します。
+どちらも通常のpandasで別に計算した結果と照合します。
+
+読む人は「表を見る」「前後を比較」「データ品質」「グラフ」を切り替えられます。
+値の検索や表示列の切替は表示上の操作で、計算結果や記録したデータは変えません。
+グラフの棒も選べるため、見た結果から入力元を確認できます。
+
+`DataStory(language="ja", description="分析の説明")`で日本語UIを選べます。
+列名・表の名前・注記は利用者が指定した内容をそのまま表示します。
+`story.annotate(frame, chapter="整える", note="...", hold=4)`で工程を章に分けられます。
+
+詳しい契約・制限・0.1からの移行は[1.0ガイド](docs/v1.md)と[API](docs/api.md)を参照してください。

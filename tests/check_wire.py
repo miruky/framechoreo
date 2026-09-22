@@ -111,6 +111,70 @@ def main():
     selected = sorted_frame.select_columns(["adjusted", "group"])
     renamed = selected.rename_columns({"adjusted": "__proto__", "group": "constructor"})
     cases.append((analysis, [source, calculated, adjusted, total, sorted_frame, selected, renamed]))
+    workflow = DataStory(language="ja", description="Cleaning and named summaries")
+    raw = workflow.table(
+        pd.DataFrame(
+            {
+                "key": [" A ", "A", "B", "B"],
+                "v": ["10", "10", "bad", "30"],
+                "day": ["2026-01-01"] * 4,
+            }
+        )
+    )
+    text = raw.string_transform("key", op="strip")
+    numeric = text.to_numeric("v", errors="coerce")
+    dated = numeric.to_datetime("day", format="%Y-%m-%d")
+    filled = dated.fill_missing({"v": 0})
+    deduped = filled.drop_duplicates()
+    kept = deduped.drop_missing(subset="key")
+    taken = kept.take_rows([2, 0, 2, 1])
+    cast = taken.astype({"v": "Int64"})
+    combined = workflow.concat([cast, kept], join="outer")
+    summary = combined.group_agg(
+        by="key",
+        aggregations={
+            "total": ("v", "sum"),
+            "average": ("v", "mean"),
+            "minimum": ("v", "min"),
+            "maximum": ("v", "max"),
+            "median": ("v", "median"),
+            "count": ("v", "count"),
+            "distinct": ("v", "nunique"),
+        },
+        dropna=False,
+    )
+    cases.append(
+        (
+            workflow,
+            [raw, text, numeric, dated, filled, deduped, kept, taken, cast, combined, summary],
+        )
+    )
+    reshaping = DataStory()
+    wide = reshaping.table(pd.DataFrame({"id": ["b", "a"], "Jan": [1, 2], "Feb": [3.0, None]}))
+    long = wide.melt(id_vars="id", value_vars=["Jan", "Feb"], var_name="month", value_name="amount")
+    pivoted = long.pivot(index="id", columns="month", values="amount")
+    cases.append((reshaping, [wide, long, pivoted]))
+    for how in ["right", "outer"]:
+        joining = DataStory()
+        left = joining.table(pd.DataFrame({"sku": ["x", "y", None], "v": [1, 2, 3]}))
+        right = joining.table(pd.DataFrame({"code": ["x", "z", None], "v": [4, 5, 6]}))
+        joined = left.merge(right, left_on="sku", right_on="code", how=how, validate="one_to_one")
+        cases.append((joining, [left, right, joined]))
+
+    reserved = DataStory()
+    source = reserved.table(pd.DataFrame({"key": ["a", "a"], "v": [1, 3]}))
+    result = source.group_agg(
+        by="key",
+        aggregations={"func": ("v", "sum"), "engine": ("v", "mean"), "__proto__": ("v", "nunique")},
+        dropna=False,
+    )
+    cases.append((reserved, [source, result]))
+    gaps = DataStory()
+    first = gaps.table(pd.DataFrame({"x": [1, 2], "id": ["a", "b"]}))
+    second = gaps.table(pd.DataFrame({"y": [3], "id": ["c"]}))
+    combined = gaps.concat([first, second, first])
+    cases.append((gaps, [first, second, combined]))
+
     for story, frames in cases:
         checks = []
         for frame in frames:

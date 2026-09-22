@@ -32,7 +32,16 @@ def main() -> None:
             assert not forbidden.intersection(Path(name).parts), name
             if name.startswith("framechoreo/"):
                 assert archive.read(name) == (root / "src" / name).read_bytes(), name
-        for name in ["assets/model.js", "assets/player.js", "assets/player.css", "py.typed"]:
+        for name in [
+            "assets/model.js",
+            "assets/player.js",
+            "assets/player.css",
+            "assets/workbench.js",
+            "assets/workbench.css",
+            "assets/LICENSE.txt",
+            "profile.py",
+            "py.typed",
+        ]:
             assert "framechoreo/" + name in wheel_names
         assert any(name.endswith("/licenses/LICENSE") for name in wheel_names)
     with tarfile.open(source) as archive:
@@ -65,6 +74,12 @@ def main() -> None:
             "tests/motion-fixtures.cjs",
             "tests/test_analysis.py",
             "tests/test_group_aggregates.py",
+            "tests/test_workflows.py",
+            "tests/player-workbench.test.cjs",
+            "tests/player-workflow-model.test.cjs",
+            "tests/player-reshape.test.cjs",
+            "tests/fixtures/retail.json",
+            "tests/fixtures/reshape.json",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -74,6 +89,9 @@ def main() -> None:
             "examples/large_analysis.py",
             "examples/group_aggregates.py",
             "examples/motion_showcase.py",
+            "examples/retail_workflow.py",
+            "examples/reshape_workflow.py",
+            "docs/v1.md",
             "docs/analysis.md",
             "docs/api.md",
             "LICENSE",
@@ -119,11 +137,33 @@ assert counted.to_pandas().iat[0, 1] == 2
 assert [o.value for o in average.explain(0, "score")] == [5., 4.]
 assert counted.explain_page(0, "score").total == 2
 assert 'value-flight' in analysis_story.to_html(result=average)
+workflow = DataStory(language="ja", description="Fresh-install workflow")
+raw = workflow.table(pd.DataFrame({
+    "id":[" a ","b","c"], "v":["10","bad","30"], "date":["2026-01-01"]*3
+}))
+clean = (
+    raw.string_transform("id",op="strip").to_numeric("v",errors="coerce")
+    .fill_missing({"v":0}).astype({"v":"Int64"})
+    .to_datetime("date",format="%Y-%m-%d").drop_missing().drop_duplicates()
+)
+combo = workflow.concat([clean,clean.take_rows([0])])
+stats = combo.group_agg(
+    by="id",aggregations={"func":("v","sum"),"average":("v","mean")},dropna=False
+)
+assert stats.to_pandas()["func"].tolist() == [20,0,30]
+long = stats.melt(id_vars="id",value_vars=["func","average"])
+wide = long.pivot(index="id",columns="variable",values="value")
+assert wide.to_pandas()["func"].tolist() == [20,0,30]
+assert clean.profile()["missing_cells"] == 0
+workflow_html = workflow.to_html(result=wide)
+assert 'FrameChoreoWorkbench' in workflow_html and 'framechoreo-license' in workflow_html
+assert 'lang="ja"' in workflow_html
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
     "origins": [int(o.value) for o in total.explain(0,"amount")],
     "analysis_rows": 1000, "analysis_source_total": last_page.total,
+    "workflow_result_rows": len(wide.to_pandas()), "workflow_language": "ja",
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

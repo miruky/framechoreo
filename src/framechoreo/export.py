@@ -11,15 +11,29 @@ from importlib.resources import files
 from pathlib import Path
 
 
-def render_html(data: str, title: str, theme: str, *, compression: str = "auto") -> str:
+def render_html(
+    data: str, title: str, theme: str, *, compression: str = "auto", language: str = "en"
+) -> str:
+    if not isinstance(language, str) or language not in ("en", "ja"):
+        raise ValueError("language must be en or ja")
     if not isinstance(theme, str) or theme not in {"auto", "light", "dark"}:
         raise ValueError("theme must be 'auto', 'light', or 'dark'")
     if not isinstance(compression, str) or compression not in {"auto", "none", "gzip"}:
         raise ValueError("compression must be 'auto', 'none', or 'gzip'")
     assets = files("framechoreo").joinpath("assets")
     css = assets.joinpath("player.css").read_text(encoding="utf-8")
+    css += "\n" + assets.joinpath("workbench.css").read_text(encoding="utf-8")
     model = assets.joinpath("model.js").read_text(encoding="utf-8")
+    workbench = assets.joinpath("workbench.js").read_text(encoding="utf-8")
     player = assets.joinpath("player.js").read_text(encoding="utf-8")
+    license_text = assets.joinpath("LICENSE.txt").read_text(encoding="utf-8")
+    license_label = "プレイヤーのライセンス (MIT)" if language == "ja" else "Player license (MIT)"
+    license_scope = (
+        "同梱プレイヤーのコードに適用します。利用者のデータや説明文のライセンスは変更しません。"
+        if language == "ja"
+        else "Applies to the bundled player code. "
+        "It does not change the license of your data or narrative."
+    )
     safe_data = None
     encoding = "json"
     data_type = "application/json"
@@ -41,7 +55,7 @@ def render_html(data: str, title: str, theme: str, *, compression: str = "auto")
             .replace("\u2029", "\\u2029")
         )
     return (
-        '<!doctype html>\n<html lang="en" data-theme="' + theme + '">\n<head>\n'
+        '<!doctype html>\n<html lang="' + language + '" data-theme="' + theme + '">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
         '<link rel="icon" href="data:,">\n'
@@ -54,7 +68,10 @@ def render_html(data: str, title: str, theme: str, *, compression: str = "auto")
         "No network access is required.</noscript>\n"
         f'<script id="framechoreo-data" type="{data_type}" data-encoding="{encoding}" '
         f'data-json-bytes="{len(raw)}">{safe_data}</script>\n'
-        f"<script>{model}</script>\n<script>{player}</script>\n</body>\n</html>\n"
+        '<details id="framechoreo-license" class="player-license">'
+        f"<summary>{license_label}</summary>"
+        f"<p>{license_scope}</p><pre>{html.escape(license_text, quote=False)}</pre></details>\n"
+        f"<script>{model}</script>\n<script>{workbench}</script>\n<script>{player}</script>\n</body>\n</html>\n"
     )
 
 
@@ -90,8 +107,14 @@ def notebook_html(text: str, title: str) -> str:
     )
 
 
-def notebook_placeholder(title: str) -> str:
+def notebook_placeholder(title: str, language: str = "en") -> str:
     return (
-        '<div role="note"><strong>' + html.escape(title) + "</strong>"
-        "<p>Add a table with <code>story.table(df)</code> to start this story.</p></div>"
+        '<div role="note"><strong>'
+        + html.escape(title)
+        + "</strong>"
+        + (
+            "<p><code>story.table(df)</code>で表を追加すると、ストーリーを表示できます。</p></div>"
+            if language == "ja"
+            else "<p>Add a table with <code>story.table(df)</code> to start this story.</p></div>"
+        )
     )

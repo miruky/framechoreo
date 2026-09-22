@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 1.0.0rc1 — Unpublished candidate
+
+- Add missing-value handling, deduplication, explicit row selection, dtype and numeric/date conversion, and string normalization.
+- Add vertical concatenation, melt/pivot reshaping, and named multi-metric grouping with seven reducers.
+- Extend validated joins to right/outer and one-to-many relationships, with separate left/right keys.
+- Add native quality profiles and reader views for searching, visible columns, before/after comparison, quality inspection, and charts.
+- Add Japanese controls, descriptions, chapter navigation, branch/table inspection, and a value-input step list.
+- Preserve group colors through sorting and move recorded reshape/arithmetic inputs into their destinations.
+- Add complete retail and reshape workflows, property tests, malformed-payload checks, and an embedded player-only MIT notice.
+
+## 0.1.0 — Local development history
 
 - Animate recorded join inputs from compact source cards and non-missing aggregate values into their actual destination cells.
 - Add group numbers and tinted rows, distinguish selected values from source highlights, and provide replay with shared pause/speed controls.

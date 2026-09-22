@@ -1,0 +1,2627 @@
+{
+  "format": "framechoreo.story",
+  "schema_version": 1,
+  "library_version": "1.0.0rc1",
+  "pandas_version": "3.0.6",
+  "title": "Follow values as a table changes shape",
+  "language": "en",
+  "description": "Unpivot monthly fields, summarize by region and month, and rebuild a comparison table.",
+  "result": "step-6",
+  "timeline": [
+    "step-0",
+    "step-1",
+    "step-2",
+    "step-3",
+    "step-4",
+    "step-5",
+    "step-6"
+  ],
+  "steps": [
+    {
+      "id": "step-0",
+      "name": "Monthly store sales",
+      "operation": "source",
+      "label": "Monthly store sales",
+      "columns": [
+        "store",
+        "region",
+        "Jan",
+        "Feb",
+        "Mar"
+      ],
+      "dtypes": [
+        "str",
+        "str",
+        "Int64",
+        "Int64",
+        "Int64"
+      ],
+      "parents": [],
+      "parameters": {},
+      "presentation": {
+        "note": "All data is synthetic.",
+        "hold_ms": 4000,
+        "highlight": [],
+        "chapter": "01 · Shape"
+      },
+      "profile": {
+        "rows": 3,
+        "column_count": 5,
+        "missing_cells": 1,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "store",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Jan",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "Feb",
+            "dtype": "Int64",
+            "missing": 1,
+            "unique": 2
+          },
+          {
+            "name": "Mar",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 3
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-0:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "integer",
+              "value": "100",
+              "display": "100"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            },
+            {
+              "type": "integer",
+              "value": "150",
+              "display": "150"
+            }
+          ],
+          "parents": [],
+          "cell_parents": {}
+        },
+        {
+          "id": "step-0:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-B",
+              "display": "N-B"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "integer",
+              "value": "200",
+              "display": "200"
+            },
+            {
+              "type": "missing",
+              "value": null,
+              "display": "∅"
+            },
+            {
+              "type": "integer",
+              "value": "220",
+              "display": "220"
+            }
+          ],
+          "parents": [],
+          "cell_parents": {}
+        },
+        {
+          "id": "step-0:2",
+          "position": 2,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            }
+          ],
+          "parents": [],
+          "cell_parents": {}
+        }
+      ]
+    },
+    {
+      "id": "step-1",
+      "name": "Long table",
+      "operation": "melt",
+      "label": "One month per row",
+      "columns": [
+        "store",
+        "region",
+        "month",
+        "sales"
+      ],
+      "dtypes": [
+        "str",
+        "str",
+        "str",
+        "Int64"
+      ],
+      "parents": [
+        "step-0"
+      ],
+      "parameters": {
+        "id_vars": [
+          "store",
+          "region"
+        ],
+        "value_vars": [
+          "Jan",
+          "Feb",
+          "Mar"
+        ],
+        "var_name": "month",
+        "value_name": "sales"
+      },
+      "presentation": {
+        "note": "Each sales cell retains its original month column. Month labels come from the schema.",
+        "hold_ms": 4000,
+        "highlight": []
+      },
+      "profile": {
+        "rows": 9,
+        "column_count": 4,
+        "missing_cells": 1,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "store",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "month",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "sales",
+            "dtype": "Int64",
+            "missing": 1,
+            "unique": 8
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-1:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "100",
+              "display": "100"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 0
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "Jan"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-B",
+              "display": "N-B"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "200",
+              "display": "200"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "Jan"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:2",
+          "position": 2,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 2
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "Jan"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:3",
+          "position": 3,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 0
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "Feb"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:4",
+          "position": 4,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-B",
+              "display": "N-B"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "missing",
+              "value": null,
+              "display": "∅"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "Feb"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:5",
+          "position": 5,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 2
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "Feb"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:6",
+          "position": 6,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "150",
+              "display": "150"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 0
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 0,
+                "column": "Mar"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:7",
+          "position": 7,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-B",
+              "display": "N-B"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "220",
+              "display": "220"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 1,
+                "column": "Mar"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-1:8",
+          "position": 8,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-0",
+              "row": 2
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "region"
+              }
+            ],
+            "month": [],
+            "sales": [
+              {
+                "step": "step-0",
+                "row": 2,
+                "column": "Mar"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-2",
+      "name": "Drop missing",
+      "operation": "drop_missing",
+      "label": "Keep recorded sales",
+      "columns": [
+        "store",
+        "region",
+        "month",
+        "sales"
+      ],
+      "dtypes": [
+        "str",
+        "str",
+        "str",
+        "Int64"
+      ],
+      "parents": [
+        "step-1"
+      ],
+      "parameters": {
+        "subset": [
+          "sales"
+        ],
+        "how": "any",
+        "positions": [
+          0,
+          1,
+          2,
+          3,
+          5,
+          6,
+          7,
+          8
+        ],
+        "removed_rows": 1
+      },
+      "presentation": {},
+      "profile": {
+        "rows": 8,
+        "column_count": 4,
+        "missing_cells": 0,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "store",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "month",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "sales",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 8
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-2:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "100",
+              "display": "100"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 0
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 0,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 0,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 0,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 0,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-B",
+              "display": "N-B"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "200",
+              "display": "200"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 1,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 1,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 1,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:2",
+          "position": 2,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 2
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 2,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 2,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 2,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 2,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:3",
+          "position": 3,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 3
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 3,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 3,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 3,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 3,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:4",
+          "position": 4,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 5
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 5,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 5,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 5,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 5,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:5",
+          "position": 5,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-A",
+              "display": "N-A"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "150",
+              "display": "150"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 6
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 6,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 6,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 6,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 6,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:6",
+          "position": 6,
+          "cells": [
+            {
+              "type": "string",
+              "value": "N-B",
+              "display": "N-B"
+            },
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "220",
+              "display": "220"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 7
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 7,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 7,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 7,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 7,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-2:7",
+          "position": 7,
+          "cells": [
+            {
+              "type": "string",
+              "value": "S-A",
+              "display": "S-A"
+            },
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-1",
+              "row": 8
+            }
+          ],
+          "cell_parents": {
+            "store": [
+              {
+                "step": "step-1",
+                "row": 8,
+                "column": "store"
+              }
+            ],
+            "region": [
+              {
+                "step": "step-1",
+                "row": 8,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-1",
+                "row": 8,
+                "column": "month"
+              }
+            ],
+            "sales": [
+              {
+                "step": "step-1",
+                "row": 8,
+                "column": "sales"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-3",
+      "name": "Grouped metrics",
+      "operation": "group_agg",
+      "label": "Regional monthly metrics",
+      "columns": [
+        "region",
+        "month",
+        "total",
+        "average",
+        "stores"
+      ],
+      "dtypes": [
+        "str",
+        "str",
+        "Int64",
+        "Float64",
+        "Int64"
+      ],
+      "parents": [
+        "step-2"
+      ],
+      "parameters": {
+        "by": [
+          "region",
+          "month"
+        ],
+        "metrics": [
+          {
+            "output": "total",
+            "column": "sales",
+            "agg": "sum"
+          },
+          {
+            "output": "average",
+            "column": "sales",
+            "agg": "mean"
+          },
+          {
+            "output": "stores",
+            "column": "sales",
+            "agg": "count"
+          }
+        ],
+        "dropna": false,
+        "sort": false,
+        "min_count": 1,
+        "groups": [
+          {
+            "output_row": 0,
+            "input_rows": [
+              0,
+              1
+            ]
+          },
+          {
+            "output_row": 1,
+            "input_rows": [
+              2
+            ]
+          },
+          {
+            "output_row": 2,
+            "input_rows": [
+              3
+            ]
+          },
+          {
+            "output_row": 3,
+            "input_rows": [
+              4
+            ]
+          },
+          {
+            "output_row": 4,
+            "input_rows": [
+              5,
+              6
+            ]
+          },
+          {
+            "output_row": 5,
+            "input_rows": [
+              7
+            ]
+          }
+        ],
+        "excluded_rows": 0
+      },
+      "presentation": {
+        "note": "",
+        "hold_ms": 4000,
+        "highlight": [],
+        "chapter": "02 · Summarize"
+      },
+      "profile": {
+        "rows": 6,
+        "column_count": 5,
+        "missing_cells": 0,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "month",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 3
+          },
+          {
+            "name": "total",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 5
+          },
+          {
+            "name": "average",
+            "dtype": "Float64",
+            "missing": 0,
+            "unique": 6
+          },
+          {
+            "name": "stores",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-3:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "float",
+              "value": "150.0",
+              "display": "150.0"
+            },
+            {
+              "type": "integer",
+              "value": "2",
+              "display": "2"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-2",
+              "row": 0
+            },
+            {
+              "step": "step-2",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-2",
+                "row": 0,
+                "column": "region"
+              },
+              {
+                "step": "step-2",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-2",
+                "row": 0,
+                "column": "month"
+              },
+              {
+                "step": "step-2",
+                "row": 1,
+                "column": "month"
+              }
+            ],
+            "total": [
+              {
+                "step": "step-2",
+                "row": 0,
+                "column": "sales"
+              },
+              {
+                "step": "step-2",
+                "row": 1,
+                "column": "sales"
+              }
+            ],
+            "average": [
+              {
+                "step": "step-2",
+                "row": 0,
+                "column": "sales"
+              },
+              {
+                "step": "step-2",
+                "row": 1,
+                "column": "sales"
+              }
+            ],
+            "stores": [
+              {
+                "step": "step-2",
+                "row": 0,
+                "column": "sales"
+              },
+              {
+                "step": "step-2",
+                "row": 1,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-3:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Jan",
+              "display": "Jan"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "float",
+              "value": "300.0",
+              "display": "300.0"
+            },
+            {
+              "type": "integer",
+              "value": "1",
+              "display": "1"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-2",
+              "row": 2
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-2",
+                "row": 2,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-2",
+                "row": 2,
+                "column": "month"
+              }
+            ],
+            "total": [
+              {
+                "step": "step-2",
+                "row": 2,
+                "column": "sales"
+              }
+            ],
+            "average": [
+              {
+                "step": "step-2",
+                "row": 2,
+                "column": "sales"
+              }
+            ],
+            "stores": [
+              {
+                "step": "step-2",
+                "row": 2,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-3:2",
+          "position": 2,
+          "cells": [
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            },
+            {
+              "type": "float",
+              "value": "120.0",
+              "display": "120.0"
+            },
+            {
+              "type": "integer",
+              "value": "1",
+              "display": "1"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-2",
+              "row": 3
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-2",
+                "row": 3,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-2",
+                "row": 3,
+                "column": "month"
+              }
+            ],
+            "total": [
+              {
+                "step": "step-2",
+                "row": 3,
+                "column": "sales"
+              }
+            ],
+            "average": [
+              {
+                "step": "step-2",
+                "row": 3,
+                "column": "sales"
+              }
+            ],
+            "stores": [
+              {
+                "step": "step-2",
+                "row": 3,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-3:3",
+          "position": 3,
+          "cells": [
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Feb",
+              "display": "Feb"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            },
+            {
+              "type": "float",
+              "value": "320.0",
+              "display": "320.0"
+            },
+            {
+              "type": "integer",
+              "value": "1",
+              "display": "1"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-2",
+              "row": 4
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-2",
+                "row": 4,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-2",
+                "row": 4,
+                "column": "month"
+              }
+            ],
+            "total": [
+              {
+                "step": "step-2",
+                "row": 4,
+                "column": "sales"
+              }
+            ],
+            "average": [
+              {
+                "step": "step-2",
+                "row": 4,
+                "column": "sales"
+              }
+            ],
+            "stores": [
+              {
+                "step": "step-2",
+                "row": 4,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-3:4",
+          "position": 4,
+          "cells": [
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "370",
+              "display": "370"
+            },
+            {
+              "type": "float",
+              "value": "185.0",
+              "display": "185.0"
+            },
+            {
+              "type": "integer",
+              "value": "2",
+              "display": "2"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-2",
+              "row": 5
+            },
+            {
+              "step": "step-2",
+              "row": 6
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-2",
+                "row": 5,
+                "column": "region"
+              },
+              {
+                "step": "step-2",
+                "row": 6,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-2",
+                "row": 5,
+                "column": "month"
+              },
+              {
+                "step": "step-2",
+                "row": 6,
+                "column": "month"
+              }
+            ],
+            "total": [
+              {
+                "step": "step-2",
+                "row": 5,
+                "column": "sales"
+              },
+              {
+                "step": "step-2",
+                "row": 6,
+                "column": "sales"
+              }
+            ],
+            "average": [
+              {
+                "step": "step-2",
+                "row": 5,
+                "column": "sales"
+              },
+              {
+                "step": "step-2",
+                "row": 6,
+                "column": "sales"
+              }
+            ],
+            "stores": [
+              {
+                "step": "step-2",
+                "row": 5,
+                "column": "sales"
+              },
+              {
+                "step": "step-2",
+                "row": 6,
+                "column": "sales"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-3:5",
+          "position": 5,
+          "cells": [
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "string",
+              "value": "Mar",
+              "display": "Mar"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            },
+            {
+              "type": "float",
+              "value": "340.0",
+              "display": "340.0"
+            },
+            {
+              "type": "integer",
+              "value": "1",
+              "display": "1"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-2",
+              "row": 7
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-2",
+                "row": 7,
+                "column": "region"
+              }
+            ],
+            "month": [
+              {
+                "step": "step-2",
+                "row": 7,
+                "column": "month"
+              }
+            ],
+            "total": [
+              {
+                "step": "step-2",
+                "row": 7,
+                "column": "sales"
+              }
+            ],
+            "average": [
+              {
+                "step": "step-2",
+                "row": 7,
+                "column": "sales"
+              }
+            ],
+            "stores": [
+              {
+                "step": "step-2",
+                "row": 7,
+                "column": "sales"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-4",
+      "name": "Wide table",
+      "operation": "pivot",
+      "label": "Rebuild month columns",
+      "columns": [
+        "region",
+        "Feb",
+        "Jan",
+        "Mar"
+      ],
+      "dtypes": [
+        "str",
+        "Int64",
+        "Int64",
+        "Int64"
+      ],
+      "parents": [
+        "step-3"
+      ],
+      "parameters": {
+        "index": [
+          "region"
+        ],
+        "columns": "month",
+        "values": "total",
+        "output_columns": [
+          "Feb",
+          "Jan",
+          "Mar"
+        ]
+      },
+      "presentation": {
+        "note": "Pivot does not aggregate again; duplicate key pairs would be an error.",
+        "hold_ms": 4000,
+        "highlight": [],
+        "chapter": "03 · Compare"
+      },
+      "profile": {
+        "rows": 2,
+        "column_count": 4,
+        "missing_cells": 0,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Feb",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Jan",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 1
+          },
+          {
+            "name": "Mar",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-4:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "370",
+              "display": "370"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-3",
+              "row": 0
+            },
+            {
+              "step": "step-3",
+              "row": 2
+            },
+            {
+              "step": "step-3",
+              "row": 4
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-3",
+                "row": 0,
+                "column": "region"
+              },
+              {
+                "step": "step-3",
+                "row": 2,
+                "column": "region"
+              },
+              {
+                "step": "step-3",
+                "row": 4,
+                "column": "region"
+              }
+            ],
+            "Feb": [
+              {
+                "step": "step-3",
+                "row": 2,
+                "column": "total"
+              }
+            ],
+            "Jan": [
+              {
+                "step": "step-3",
+                "row": 0,
+                "column": "total"
+              }
+            ],
+            "Mar": [
+              {
+                "step": "step-3",
+                "row": 4,
+                "column": "total"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-4:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-3",
+              "row": 1
+            },
+            {
+              "step": "step-3",
+              "row": 3
+            },
+            {
+              "step": "step-3",
+              "row": 5
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-3",
+                "row": 1,
+                "column": "region"
+              },
+              {
+                "step": "step-3",
+                "row": 3,
+                "column": "region"
+              },
+              {
+                "step": "step-3",
+                "row": 5,
+                "column": "region"
+              }
+            ],
+            "Feb": [
+              {
+                "step": "step-3",
+                "row": 3,
+                "column": "total"
+              }
+            ],
+            "Jan": [
+              {
+                "step": "step-3",
+                "row": 1,
+                "column": "total"
+              }
+            ],
+            "Mar": [
+              {
+                "step": "step-3",
+                "row": 5,
+                "column": "total"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-5",
+      "name": "Selected columns",
+      "operation": "select",
+      "label": "Order the months",
+      "columns": [
+        "region",
+        "Jan",
+        "Feb",
+        "Mar"
+      ],
+      "dtypes": [
+        "str",
+        "Int64",
+        "Int64",
+        "Int64"
+      ],
+      "parents": [
+        "step-4"
+      ],
+      "parameters": {
+        "columns": [
+          "region",
+          "Jan",
+          "Feb",
+          "Mar"
+        ]
+      },
+      "presentation": {},
+      "profile": {
+        "rows": 2,
+        "column_count": 4,
+        "missing_cells": 0,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Jan",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 1
+          },
+          {
+            "name": "Feb",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Mar",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-5:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            },
+            {
+              "type": "integer",
+              "value": "370",
+              "display": "370"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-4",
+              "row": 0
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-4",
+                "row": 0,
+                "column": "region"
+              }
+            ],
+            "Jan": [
+              {
+                "step": "step-4",
+                "row": 0,
+                "column": "Jan"
+              }
+            ],
+            "Feb": [
+              {
+                "step": "step-4",
+                "row": 0,
+                "column": "Feb"
+              }
+            ],
+            "Mar": [
+              {
+                "step": "step-4",
+                "row": 0,
+                "column": "Mar"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-5:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-4",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-4",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "Jan": [
+              {
+                "step": "step-4",
+                "row": 1,
+                "column": "Jan"
+              }
+            ],
+            "Feb": [
+              {
+                "step": "step-4",
+                "row": 1,
+                "column": "Feb"
+              }
+            ],
+            "Mar": [
+              {
+                "step": "step-4",
+                "row": 1,
+                "column": "Mar"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-6",
+      "name": "Calculated column",
+      "operation": "calculate",
+      "label": "Compare March with January",
+      "columns": [
+        "region",
+        "Jan",
+        "Feb",
+        "Mar",
+        "growth"
+      ],
+      "dtypes": [
+        "str",
+        "Int64",
+        "Int64",
+        "Int64",
+        "Int64"
+      ],
+      "parents": [
+        "step-5"
+      ],
+      "parameters": {
+        "name": "growth",
+        "left": "Mar",
+        "op": "subtract",
+        "right": {
+          "column": "Jan"
+        }
+      },
+      "presentation": {
+        "note": "North's growth of 70 traces back to 150, 220, 100, and 200.",
+        "hold_ms": 5000,
+        "highlight": []
+      },
+      "profile": {
+        "rows": 2,
+        "column_count": 5,
+        "missing_cells": 0,
+        "duplicate_rows": 0,
+        "columns": [
+          {
+            "name": "region",
+            "dtype": "str",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Jan",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 1
+          },
+          {
+            "name": "Feb",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "Mar",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          },
+          {
+            "name": "growth",
+            "dtype": "Int64",
+            "missing": 0,
+            "unique": 2
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "step-6:0",
+          "position": 0,
+          "cells": [
+            {
+              "type": "string",
+              "value": "North",
+              "display": "North"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "120",
+              "display": "120"
+            },
+            {
+              "type": "integer",
+              "value": "370",
+              "display": "370"
+            },
+            {
+              "type": "integer",
+              "value": "70",
+              "display": "70"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-5",
+              "row": 0
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-5",
+                "row": 0,
+                "column": "region"
+              }
+            ],
+            "Jan": [
+              {
+                "step": "step-5",
+                "row": 0,
+                "column": "Jan"
+              }
+            ],
+            "Feb": [
+              {
+                "step": "step-5",
+                "row": 0,
+                "column": "Feb"
+              }
+            ],
+            "Mar": [
+              {
+                "step": "step-5",
+                "row": 0,
+                "column": "Mar"
+              }
+            ],
+            "growth": [
+              {
+                "step": "step-5",
+                "row": 0,
+                "column": "Mar"
+              },
+              {
+                "step": "step-5",
+                "row": 0,
+                "column": "Jan"
+              }
+            ]
+          }
+        },
+        {
+          "id": "step-6:1",
+          "position": 1,
+          "cells": [
+            {
+              "type": "string",
+              "value": "South",
+              "display": "South"
+            },
+            {
+              "type": "integer",
+              "value": "300",
+              "display": "300"
+            },
+            {
+              "type": "integer",
+              "value": "320",
+              "display": "320"
+            },
+            {
+              "type": "integer",
+              "value": "340",
+              "display": "340"
+            },
+            {
+              "type": "integer",
+              "value": "40",
+              "display": "40"
+            }
+          ],
+          "parents": [
+            {
+              "step": "step-5",
+              "row": 1
+            }
+          ],
+          "cell_parents": {
+            "region": [
+              {
+                "step": "step-5",
+                "row": 1,
+                "column": "region"
+              }
+            ],
+            "Jan": [
+              {
+                "step": "step-5",
+                "row": 1,
+                "column": "Jan"
+              }
+            ],
+            "Feb": [
+              {
+                "step": "step-5",
+                "row": 1,
+                "column": "Feb"
+              }
+            ],
+            "Mar": [
+              {
+                "step": "step-5",
+                "row": 1,
+                "column": "Mar"
+              }
+            ],
+            "growth": [
+              {
+                "step": "step-5",
+                "row": 1,
+                "column": "Mar"
+              },
+              {
+                "step": "step-5",
+                "row": 1,
+                "column": "Jan"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

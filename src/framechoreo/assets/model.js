@@ -19,7 +19,237 @@
       return false;
     return cell.type !== "integer" || /^-?(?:0|[1-9][0-9]*)$/.test(cell.value);
   }
-  const aggregateScene = { group_sum: "sum", group_mean: "mean", group_count: "count" };
+  const aggregateScene = {
+    group_sum: "sum",
+    group_mean: "mean",
+    group_count: "count",
+    group_agg: "aggregate",
+  };
+  const reducers = ["sum", "mean", "min", "max", "median", "count", "nunique"];
+  const sameList = (a, b) =>
+    Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);
+  const record = (x) => x && typeof x === "object" && !Array.isArray(x);
+  const namedKeys = (keys, columns, empty = false) =>
+    Array.isArray(keys) &&
+    (empty || keys.length > 0) &&
+    new Set(keys).size === keys.length &&
+    keys.every((c) => columns.includes(c));
+  const sameRefs = (refs, expected) =>
+    refs.length === expected.length &&
+    refs.every(
+      (r, i) =>
+        r.step === expected[i].step && r.row === expected[i].row && r.column === expected[i].column,
+    );
+  function metrics(step) {
+    if (step.operation === "group_agg") return step.parameters.metrics;
+    return Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)
+      ? [
+          {
+            output: step.parameters.value,
+            column: step.parameters.value,
+            agg: step.operation.slice(6),
+          },
+        ]
+      : [];
+  }
+  function validateWorkflow(step, steps, invalid) {
+    const p = step.parameters,
+      parent = steps.get(step.parents[0]),
+      columns = parent?.columns,
+      selected = ["drop_missing", "drop_duplicates", "take"].includes(step.operation),
+      converted = ["astype", "to_numeric", "to_datetime", "string_transform"].includes(
+        step.operation,
+      );
+    const ref = (row, column, id = parent?.id) => ({ step: id, row, column });
+    if (selected || converted || step.operation === "fill_missing") {
+      if (!sameList(step.columns, columns)) invalid("changed workflow columns");
+      const positions = selected ? p.positions : step.rows.map((_, i) => i);
+      if (
+        !Array.isArray(positions) ||
+        positions.length !== step.rows.length ||
+        positions.some((i) => !Number.isSafeInteger(i) || i < 0 || i >= parent.rows.length) ||
+        (!selected && step.rows.length !== parent.rows.length)
+      )
+        invalid("invalid workflow positions");
+      if (["drop_missing", "drop_duplicates"].includes(step.operation)) {
+        if (
+          !namedKeys(p.subset, columns) ||
+          p.removed_rows !== parent.rows.length - step.rows.length ||
+          positions.some((v, i) => i && v <= positions[i - 1])
+        )
+          invalid("invalid removed rows");
+        if (step.operation === "drop_missing") {
+          if (!["any", "all"].includes(p.how)) invalid("invalid missing-row policy");
+          const kept = parent.rows
+            .filter((r) => {
+              const missing = p.subset.map((c) => r.cells[columns.indexOf(c)].type === "missing");
+              return !(p.how === "any" ? missing.some(Boolean) : missing.every(Boolean));
+            })
+            .map((r) => r.position);
+          if (!sameList(positions, kept)) invalid("inconsistent missing-row selection");
+        } else if (!["first", "last", false].includes(p.keep)) invalid("invalid duplicate policy");
+      }
+      if (step.operation === "astype") {
+        if (
+          !record(p.mapping) ||
+          !Object.keys(p.mapping).length ||
+          Object.entries(p.mapping).some(
+            ([c, dtype]) => !columns.includes(c) || typeof dtype !== "string" || !dtype.trim(),
+          )
+        )
+          invalid("invalid dtype conversion");
+      }
+      if (["to_numeric", "to_datetime", "string_transform"].includes(step.operation)) {
+        if (!namedKeys(p.columns, columns)) invalid("invalid conversion columns");
+        if (step.operation === "string_transform") {
+          if (!["strip", "lower", "upper", "casefold"].includes(p.op))
+            invalid("invalid string operation");
+        } else if (!["raise", "coerce"].includes(p.errors)) invalid("invalid parse error policy");
+        if (
+          step.operation === "to_datetime" &&
+          (typeof p.format !== "string" || !p.format.trim() || typeof p.utc !== "boolean")
+        )
+          invalid("invalid datetime settings");
+      }
+      if (step.operation === "fill_missing") {
+        if (
+          !record(p.values) ||
+          !Object.keys(p.values).length ||
+          !record(p.filled_positions) ||
+          !sameList(Object.keys(p.filled_positions).sort(), Object.keys(p.values).sort())
+        )
+          invalid("invalid fill constants");
+        for (const [c, value] of Object.entries(p.values)) {
+          if (!columns.includes(c) || !validCell(value) || value.type === "missing")
+            invalid("invalid fill value");
+          const expected = parent.rows
+            .filter((r) => r.cells[columns.indexOf(c)].type === "missing")
+            .map((r) => r.position);
+          if (!sameList(p.filled_positions[c], expected)) invalid("inconsistent fill positions");
+        }
+      }
+      step.rows.forEach((row, i) => {
+        const position = positions[i];
+        if (!sameRefs(row.parents, [{ step: parent.id, row: position }]))
+          invalid("inconsistent workflow row reference");
+        for (const c of columns) {
+          const isFill =
+            step.operation === "fill_missing" &&
+            Object.prototype.hasOwnProperty.call(p.values, c) &&
+            parent.rows[position].cells[columns.indexOf(c)].type === "missing";
+          if (!sameRefs(row.cell_parents[c], isFill ? [] : [ref(position, c)]))
+            invalid("inconsistent workflow value input");
+        }
+      });
+    }
+    if (step.operation === "concat") {
+      if (
+        !Array.isArray(p.inputs) ||
+        !p.inputs.length ||
+        p.inputs.some((id) => !step.parents.includes(id)) ||
+        new Set(p.inputs).size !== step.parents.length ||
+        !["inner", "outer"].includes(p.join) ||
+        typeof p.ignore_index !== "boolean"
+      )
+        invalid("invalid concatenation inputs");
+      const inputs = p.inputs.map((id) => steps.get(id));
+      const expected =
+        p.join === "outer"
+          ? [...new Set(inputs.flatMap((s) => s.columns))]
+          : inputs[0].columns.filter((c) => inputs.every((s) => s.columns.includes(c)));
+      if (
+        !sameList(step.columns, expected) ||
+        step.rows.length !== inputs.reduce((n, s) => n + s.rows.length, 0)
+      )
+        invalid("inconsistent concatenation shape");
+      let position = 0;
+      for (const input of inputs)
+        for (const source of input.rows) {
+          const row = step.rows[position++];
+          if (!sameRefs(row.parents, [{ step: input.id, row: source.position }]))
+            invalid("inconsistent concatenation row");
+          for (const c of step.columns)
+            if (
+              !sameRefs(
+                row.cell_parents[c],
+                input.columns.includes(c) ? [ref(source.position, c, input.id)] : [],
+              )
+            )
+              invalid("inconsistent concatenation value");
+        }
+    }
+    if (step.operation === "melt") {
+      if (
+        !namedKeys(p.id_vars, columns, true) ||
+        !namedKeys(p.value_vars, columns) ||
+        p.id_vars.some((c) => p.value_vars.includes(c)) ||
+        !sameList(step.columns, [...p.id_vars, p.var_name, p.value_name]) ||
+        step.rows.length !== parent.rows.length * p.value_vars.length
+      )
+        invalid("invalid melt shape");
+      step.rows.forEach((row, i) => {
+        const position = i % parent.rows.length,
+          valueColumn = p.value_vars[Math.floor(i / parent.rows.length)];
+        if (
+          !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+          !sameRefs(row.cell_parents[p.var_name], []) ||
+          !sameRefs(row.cell_parents[p.value_name], [ref(position, valueColumn)]) ||
+          row.cells[step.columns.indexOf(p.var_name)].type !== "string" ||
+          row.cells[step.columns.indexOf(p.var_name)].value !== valueColumn
+        )
+          invalid("inconsistent melt inputs");
+        for (const c of p.id_vars)
+          if (!sameRefs(row.cell_parents[c], [ref(position, c)]))
+            invalid("inconsistent melt identity");
+      });
+    }
+    if (step.operation === "pivot") {
+      if (
+        !namedKeys(p.index, columns) ||
+        !columns.includes(p.columns) ||
+        !columns.includes(p.values) ||
+        p.index.includes(p.columns) ||
+        p.index.includes(p.values) ||
+        p.columns === p.values ||
+        !Array.isArray(p.output_columns) ||
+        !sameList(step.columns, [...p.index, ...p.output_columns])
+      )
+        invalid("invalid pivot fields");
+      const used = new Set();
+      for (const row of step.rows) {
+        const positions = [];
+        for (const c of p.output_columns) {
+          const refs = row.cell_parents[c];
+          if (refs.length > 1 || refs.some((r) => r.column !== p.values))
+            invalid("invalid pivot value input");
+          for (const r of refs) {
+            const key = parent.rows[r.row].cells[columns.indexOf(p.columns)];
+            if (key.type !== "string" || key.value !== c || used.has(r.row))
+              invalid("inconsistent pivot placement");
+            used.add(r.row);
+            positions.push(r.row);
+          }
+        }
+        positions.sort((a, b) => a - b);
+        if (
+          !sameRefs(
+            row.parents,
+            positions.map((row) => ({ step: parent.id, row })),
+          )
+        )
+          invalid("inconsistent pivot membership");
+        for (const c of p.index)
+          if (
+            !sameRefs(
+              row.cell_parents[c],
+              positions.map((r) => ref(r, c)),
+            )
+          )
+            invalid("inconsistent pivot key inputs");
+      }
+      if (used.size !== parent.rows.length) invalid("pivot omitted an input row");
+    }
+  }
   function indexStory(data) {
     if (!data || data.format !== "framechoreo.story" || data.schema_version !== 1) {
       throw new Error("Unsupported story format");
@@ -29,6 +259,13 @@
     };
     if (!Array.isArray(data.steps) || !Array.isArray(data.timeline))
       invalid("missing steps or timeline");
+    if (data.language !== undefined && !["en", "ja"].includes(data.language))
+      invalid("invalid language");
+    if (
+      data.description !== undefined &&
+      (!textValue(data.description) || [...data.description].length > 2000)
+    )
+      invalid("invalid description");
     const steps = new Map();
     const parentCounts = {
       source: 0,
@@ -41,6 +278,18 @@
       select: 1,
       rename: 1,
       calculate: 1,
+      drop_missing: 1,
+      fill_missing: 1,
+      drop_duplicates: 1,
+      take: 1,
+      astype: 1,
+      to_numeric: 1,
+      to_datetime: 1,
+      string_transform: 1,
+      melt: 1,
+      pivot: 1,
+      concat: -1,
+      group_agg: 1,
     };
     for (const step of data.steps) {
       if (!step || typeof step.id !== "string" || !step.id || steps.has(step.id))
@@ -57,7 +306,9 @@
       if (
         !Array.isArray(step.rows) ||
         !Array.isArray(step.parents) ||
-        step.parents.length !== parentCounts[step.operation] ||
+        (step.operation === "concat"
+          ? !step.parents.length || new Set(step.parents).size !== step.parents.length
+          : step.parents.length !== parentCounts[step.operation]) ||
         step.parents.some((id) => !steps.has(id))
       )
         invalid("invalid or cyclic parents");
@@ -107,6 +358,37 @@
       });
       const p = step.parameters;
       if (!p || typeof p !== "object" || Array.isArray(p)) invalid("missing operation settings");
+      validateWorkflow(step, steps, invalid);
+      if (step.profile !== undefined) {
+        const profile = step.profile;
+        if (
+          !record(profile) ||
+          profile.rows !== step.rows.length ||
+          profile.column_count !== step.columns.length ||
+          !Array.isArray(profile.columns) ||
+          profile.columns.length !== step.columns.length ||
+          !Number.isSafeInteger(profile.duplicate_rows) ||
+          profile.duplicate_rows < 0 ||
+          profile.duplicate_rows > Math.max(0, step.rows.length - 1)
+        )
+          invalid("invalid quality profile");
+        let missing = 0;
+        profile.columns.forEach((c, i) => {
+          const n = step.rows.reduce((sum, r) => sum + (r.cells[i].type === "missing" ? 1 : 0), 0);
+          if (
+            !record(c) ||
+            c.name !== step.columns[i] ||
+            typeof c.dtype !== "string" ||
+            c.missing !== n ||
+            !Number.isSafeInteger(c.unique) ||
+            c.unique < 0 ||
+            c.unique > step.rows.length - n
+          )
+            invalid("invalid column profile");
+          missing += n;
+        });
+        if (profile.missing_cells !== missing) invalid("inconsistent missing-cell count");
+      }
       if (["sort", "select", "rename", "calculate"].includes(step.operation)) {
         const parent = steps.get(step.parents[0]);
         if (step.rows.length !== parent.rows.length) invalid("inconsistent analysis row count");
@@ -229,21 +511,28 @@
         });
       }
       if (step.operation === "merge") {
+        const left = steps.get(step.parents[0]),
+          right = steps.get(step.parents[1]),
+          leftKeys = p.left_on || p.on,
+          rightKeys = p.right_on || p.on;
         if (
-          !Array.isArray(p.on) ||
-          !p.on.length ||
-          new Set(p.on).size !== p.on.length ||
-          p.on.some((key) => step.parents.some((id) => !steps.get(id).columns.includes(key))) ||
-          !["left", "inner"].includes(p.how) ||
-          !["many_to_one", "one_to_one", "m:1", "1:1"].includes(p.validate) ||
+          !namedKeys(leftKeys, left.columns) ||
+          !namedKeys(rightKeys, right.columns) ||
+          leftKeys.length !== rightKeys.length ||
+          !["left", "inner", "right", "outer"].includes(p.how) ||
+          !["many_to_one", "one_to_one", "one_to_many", "m:1", "1:1", "1:m"].includes(p.validate) ||
           !Array.isArray(p.suffixes) ||
           p.suffixes.length !== 2 ||
-          p.suffixes.some((value) => typeof value !== "string")
+          p.suffixes.some((v) => typeof v !== "string")
         )
           invalid("invalid join settings");
+        const noRight = step.rows.filter((r) => !r.parents.some((p) => p.step === right.id)).length,
+          noLeft = step.rows.filter((r) => !r.parents.some((p) => p.step === left.id)).length;
         if (
-          p.unmatched_rows !== step.rows.filter((row) => row.parents.length === 1).length ||
-          (p.how === "inner" && p.unmatched_rows !== 0)
+          p.unmatched_rows !== noRight ||
+          (p.unmatched_left_rows !== undefined && p.unmatched_left_rows !== noLeft) ||
+          (["right", "inner"].includes(p.how) && noRight !== 0) ||
+          (["left", "inner"].includes(p.how) && noLeft !== 0)
         )
           invalid("inconsistent join counts");
       }
@@ -251,7 +540,7 @@
         const p = step.parameters,
           parent = steps.get(step.parents[0]),
           seen = new Set(),
-          hasMinCount = step.operation === "group_sum";
+          hasMinCount = ["group_sum", "group_agg"].includes(step.operation);
         if (
           !p ||
           !Array.isArray(p.by) ||
@@ -268,10 +557,27 @@
           (hasMinCount
             ? !Number.isSafeInteger(p.min_count) || p.min_count < 0
             : p.min_count !== undefined) ||
-          !step.columns.includes(p.value) ||
-          p.by.includes(p.value)
+          (step.operation !== "group_agg" &&
+            (!step.columns.includes(p.value) || p.by.includes(p.value)))
         )
           invalid("invalid aggregation settings");
+        if (step.operation === "group_agg") {
+          if (
+            !Array.isArray(p.metrics) ||
+            !p.metrics.length ||
+            p.metrics.some(
+              (m) =>
+                !record(m) ||
+                !parent.columns.includes(m.column) ||
+                p.by.includes(m.column) ||
+                !reducers.includes(m.agg) ||
+                typeof m.output !== "string" ||
+                !m.output.trim(),
+            ) ||
+            !sameList(step.columns, [...p.by, ...p.metrics.map((m) => m.output)])
+          )
+            invalid("invalid named metrics");
+        }
         p.groups.forEach((group, i) => {
           if (group.output_row !== i || !Array.isArray(group.input_rows))
             invalid("invalid group output");
@@ -283,6 +589,34 @@
         });
         if (p.excluded_rows !== parent.rows.length - seen.size)
           invalid("inconsistent grouping count");
+        if (step.operation === "group_agg")
+          step.rows.forEach((row, i) => {
+            const members = p.groups[i].input_rows;
+            if (
+              !sameRefs(
+                row.parents,
+                members.map((row) => ({ step: parent.id, row })),
+              )
+            )
+              invalid("inconsistent metric membership");
+            for (const m of p.metrics) {
+              const expected = members
+                .filter(
+                  (j) => parent.rows[j].cells[parent.columns.indexOf(m.column)].type !== "missing",
+                )
+                .map((row) => ({ step: parent.id, row, column: m.column }));
+              if (!sameRefs(row.cell_parents[m.output], expected))
+                invalid("inconsistent metric value inputs");
+            }
+            for (const c of p.by)
+              if (
+                !sameRefs(
+                  row.cell_parents[c],
+                  members.map((row) => ({ step: parent.id, row, column: c })),
+                )
+              )
+                invalid("inconsistent metric key inputs");
+          });
       }
       if (step.presentation) {
         const presentation = step.presentation;
@@ -293,8 +627,16 @@
             presentation.hold_ms > 30000)
         )
           invalid("invalid scene hold time");
-        if (presentation.note !== undefined && typeof presentation.note !== "string")
+        if (
+          presentation.note !== undefined &&
+          (!textValue(presentation.note) || [...presentation.note].length > 600)
+        )
           invalid("invalid scene note");
+        if (
+          presentation.chapter !== undefined &&
+          (!textValue(presentation.chapter) || [...presentation.chapter].length > 100)
+        )
+          invalid("invalid chapter label");
         if (
           presentation.highlight !== undefined &&
           (!Array.isArray(presentation.highlight) ||
@@ -334,6 +676,7 @@
     const steps = preparedIndex || indexStory(data);
     validateReference(steps, reference);
     const counts = new Map(),
+      usedSteps = new Set(),
       work = [[reference, false]],
       keyOf = (ref) => cellKey(ref.step, ref.row, ref.column);
     while (work.length) {
@@ -341,6 +684,7 @@
         key = keyOf(ref);
       if (counts.has(key)) continue;
       const step = steps.get(ref.step);
+      usedSteps.add(step.id);
       if (step.operation === "source") {
         counts.set(key, 1n);
         continue;
@@ -359,6 +703,7 @@
     const total = counts.get(keyOf(reference));
     return {
       total,
+      steps: [...steps.keys()].filter((id) => usedSteps.has(id)),
       hasSource(step, row, column) {
         return steps.get(step)?.operation === "source" && counts.has(cellKey(step, row, column));
       },
@@ -436,13 +781,89 @@
   function cellKey(step, row, column) {
     return JSON.stringify([step, row, column]);
   }
-  function cellExplanation(steps, reference) {
+  function cellExplanation(steps, reference, language = "en") {
+    if (language === "ja") {
+      const original = cellExplanation(steps, reference, "en");
+      if (!original.text) return original;
+      const step = validateReference(steps, reference),
+        row = step.rows[reference.row],
+        m = metrics(step).find((m) => m.output === reference.column),
+        refs = row.cell_parents[reference.column] || [];
+      let text;
+      if (m) {
+        const names = {
+          sum: "合計",
+          mean: "平均",
+          min: "最小値",
+          max: "最大値",
+          median: "中央値",
+          count: "非欠損値の件数",
+          nunique: "ユニーク値数",
+        };
+        text = refs.length + "個の欠損でない入力から、" + names[m.agg] + "を求めています。";
+        if (m.agg === "sum" && refs.length < step.parameters.min_count)
+          text =
+            "有効な入力が" +
+            refs.length +
+            "個で、必要数（min_count=" +
+            step.parameters.min_count +
+            "）に足りないため、通常は欠損になります。";
+        else if (!refs.length)
+          text =
+            m.agg === "count" ||
+            m.agg === "nunique" ||
+            (m.agg === "sum" && step.parameters.min_count === 0)
+              ? "有効な入力がないため、記録された件数・合計は0です。"
+              : "有効な入力がないため、結果は欠損です。";
+        if (m.agg === "nunique") text += "判定に使った重複値も、入力の一覧には残しています。";
+        if (original.warning) {
+          text =
+            "記録された結果と入力の関係に注意が必要です。入力の数・値・列の型を確認してください。";
+          if (
+            m.agg === "sum" &&
+            refs.every(
+              (r) =>
+                steps.get(r.step).rows[r.row].cells[steps.get(r.step).columns.indexOf(r.column)]
+                  .type === "integer",
+            )
+          ) {
+            const exact = refs.reduce(
+              (n, r) =>
+                n +
+                BigInt(
+                  steps.get(r.step).rows[r.row].cells[steps.get(r.step).columns.indexOf(r.column)]
+                    .value,
+                ),
+              0n,
+            );
+            text +=
+              " 整数としての加算結果は" + exact + "です。型の桁あふれなどを確認してください。";
+          }
+        }
+      } else if (step.operation === "fill_missing")
+        text =
+          "指定した定数で欠損を補った値です。元データの値を入力として捏造せず、補う前のセルは前の表に残しています。";
+      else if (step.operation === "melt")
+        text = "元の列名から作ったラベルです。元データの値セルをコピーしたものではありません。";
+      else if (["pivot", "concat"].includes(step.operation))
+        text =
+          "この行と列の組み合わせには元の値セルがありません。表の形を変える際にできた欠損です。";
+      else if (step.operation === "merge")
+        text = "この結合結果には、条件に一致する側の入力値がありません。";
+      else
+        text =
+          "変換前の入力セルをたどれます。読み取りに失敗して欠損になった場合も、元の文字列を確認できます。";
+      return { text, ...(original.warning ? { warning: true } : {}) };
+    }
     const step = validateReference(steps, reference),
       row = step.rows[reference.row],
       cell = row.cells[step.columns.indexOf(reference.column)],
-      p = step.parameters;
-    if (step.operation === "group_sum" && reference.column === p.value) {
-      const refs = row.cell_parents[p.value],
+      p = step.parameters,
+      metric = metrics(step).find((m) => m.output === reference.column),
+      operation = metric ? "group_" + metric.agg : step.operation,
+      valueColumn = metric?.output || p.value;
+    if (operation === "group_sum" && reference.column === valueColumn) {
+      const refs = row.cell_parents[valueColumn],
         count = refs.length;
       if (count < p.min_count && cell.type === "missing")
         return {
@@ -491,8 +912,8 @@
           warning: true,
         };
     }
-    if (step.operation === "group_mean" && reference.column === p.value) {
-      const refs = row.cell_parents[p.value],
+    if (operation === "group_mean" && reference.column === valueColumn) {
+      const refs = row.cell_parents[valueColumn],
         count = refs.length;
       if (count === 0)
         return cell.type === "missing"
@@ -507,8 +928,8 @@
           warning: true,
         };
     }
-    if (step.operation === "group_count" && reference.column === p.value) {
-      const refs = row.cell_parents[p.value],
+    if (operation === "group_count" && reference.column === valueColumn) {
+      const refs = row.cell_parents[valueColumn],
         count = refs.length;
       if (count === 0) return { text: "There are no non-missing input values; the count is 0." };
       if (cell.type !== "integer" || BigInt(cell.value) !== BigInt(count))
@@ -525,7 +946,45 @@
       row.parents.length === 1 &&
       row.cell_parents[reference.column].length === 0
     )
-      return { text: "This left join found no right-side match for the selected value." };
+      return {
+        text:
+          p.how === "left"
+            ? "This left join found no right-side match for the selected value."
+            : "No value from the corresponding input table matched this join cell.",
+      };
+    if (metric && ["min", "max", "median", "nunique"].includes(metric.agg))
+      return {
+        text:
+          "The " +
+          metric.agg +
+          " used " +
+          row.cell_parents[valueColumn].length +
+          " non-missing candidate values. Repeated inputs remain visible even when the operation counts unique values.",
+      };
+    if (step.operation === "fill_missing" && row.cell_parents[reference.column].length === 0)
+      return {
+        text: "This value was filled from an explicit constant. It has no raw value input; the original missing cell remains in the preceding table.",
+      };
+    if (step.operation === "melt" && reference.column === p.var_name)
+      return {
+        text: "This label comes from the original column name, not from a source data cell.",
+      };
+    if (
+      ["concat", "pivot"].includes(step.operation) &&
+      row.cell_parents[reference.column].length === 0
+    )
+      return {
+        text: "No recorded input cell occupies this column/row combination. This missing value was introduced by the table shape.",
+      };
+    if (
+      (step.operation === "astype" &&
+        Object.prototype.hasOwnProperty.call(p.mapping, reference.column)) ||
+      (["to_numeric", "to_datetime", "string_transform"].includes(step.operation) &&
+        p.columns.includes(reference.column))
+    )
+      return {
+        text: "The recorded conversion retains the original input cell, including when parsing produced a missing value.",
+      };
     return { text: "" };
   }
   function tableLabel(data, step) {
@@ -535,6 +994,23 @@
     return sources.filter((item) => item.name === step.name).length > 1
       ? label + " (source " + (sources.findIndex((item) => item.id === step.id) + 1) + ")"
       : label;
+  }
+  function groupIdentity(steps, stepId, position) {
+    const seen = new Set();
+    while (!seen.has(stepId)) {
+      seen.add(stepId);
+      const step = steps.get(stepId),
+        row = step?.rows[position];
+      if (!row) return null;
+      if (Object.prototype.hasOwnProperty.call(aggregateScene, step.operation))
+        return { step: stepId, row: position };
+      if (["source", "concat", "pivot", "melt"].includes(step.operation)) return null;
+      const parent = row.parents.find((r) => r.step === step.parents[0]);
+      if (!parent) return null;
+      stepId = parent.step;
+      position = parent.row;
+    }
+    return null;
   }
   function groupTitle(scene, groupIndex) {
     const row = scene.step.rows[groupIndex];
@@ -563,6 +1039,65 @@
     const p = scene.step.parameters;
     if (scene.kind === "source") return "Recorded input";
     if (scene.kind === "filter") return "filter_rows(predicate)";
+    if (scene.kind === "drop_missing")
+      return (
+        "drop_missing(subset=" + JSON.stringify(p.subset) + ", how=" + JSON.stringify(p.how) + ")"
+      );
+    if (scene.kind === "drop_duplicates")
+      return (
+        "drop_duplicates(subset=" +
+        JSON.stringify(p.subset) +
+        ", keep=" +
+        (p.keep === false ? "False" : JSON.stringify(p.keep)) +
+        ")"
+      );
+    if (scene.kind === "take") return "take_rows(" + JSON.stringify(p.positions) + ")";
+    if (scene.kind === "fill_missing")
+      return "fill_missing(values=" + JSON.stringify(p.values) + ")";
+    if (scene.kind === "astype") return "astype(" + JSON.stringify(p.mapping) + ")";
+    if (["to_numeric", "to_datetime", "string_transform"].includes(scene.kind)) {
+      const options = Object.entries(p)
+        .filter(([key]) => key !== "columns")
+        .map(
+          ([key, value]) =>
+            key +
+            "=" +
+            (typeof value === "boolean" ? (value ? "True" : "False") : JSON.stringify(value)),
+        );
+      return scene.kind + "(" + JSON.stringify(p.columns) + ", " + options.join(", ") + ")";
+    }
+    if (scene.kind === "concat")
+      return (
+        "concat(inputs=" +
+        JSON.stringify(p.inputs) +
+        ", join=" +
+        JSON.stringify(p.join) +
+        ", ignore_index=" +
+        (p.ignore_index ? "True" : "False") +
+        ")"
+      );
+    if (scene.kind === "melt")
+      return (
+        "melt(id_vars=" +
+        JSON.stringify(p.id_vars) +
+        ", value_vars=" +
+        JSON.stringify(p.value_vars) +
+        ", var_name=" +
+        JSON.stringify(p.var_name) +
+        ", value_name=" +
+        JSON.stringify(p.value_name) +
+        ")"
+      );
+    if (scene.kind === "pivot")
+      return (
+        "pivot(index=" +
+        JSON.stringify(p.index) +
+        ", columns=" +
+        JSON.stringify(p.columns) +
+        ", values=" +
+        JSON.stringify(p.values) +
+        ")"
+      );
     if (scene.kind === "sort")
       return (
         "sort_values(" +
@@ -595,8 +1130,12 @@
       );
     if (scene.kind === "merge")
       return (
-        "merge(on=" +
-        JSON.stringify(p.on) +
+        (p.on
+          ? "merge(on=" + JSON.stringify(p.on)
+          : "merge(left_on=" +
+            JSON.stringify(p.left_on) +
+            ", right_on=" +
+            JSON.stringify(p.right_on)) +
         ", how=" +
         JSON.stringify(p.how) +
         ", validate=" +
@@ -614,6 +1153,18 @@
       (p.sort ? "True" : "False") +
       ", observed=True)";
     if (scene.kind === "group") return group;
+    if (scene.kind === "aggregate")
+      return (
+        "group_agg(by=" +
+        JSON.stringify(p.by) +
+        ", aggregations=" +
+        JSON.stringify(Object.fromEntries(p.metrics.map((m) => [m.output, [m.column, m.agg]]))) +
+        ", dropna=" +
+        (p.dropna ? "True" : "False") +
+        ", min_count=" +
+        p.min_count +
+        ")"
+      );
     const call = {
       group_sum: "sum(min_count=" + p.min_count + ")",
       group_mean: "mean()",
@@ -623,6 +1174,8 @@
   }
   const api = {
     indexStory,
+    metrics,
+    groupIdentity,
     scenes,
     traceCell,
     prepareTrace,

@@ -230,7 +230,7 @@ function mount(data = fixture(), options = {}) {
   window.fetch = () => {
     throw new Error("Player must not use the network");
   };
-  for (const file of ["model.js", "player.js"])
+  for (const file of ["model.js", "workbench.js", "player.js"])
     window.eval(fs.readFileSync(path.join(__dirname, "../src/framechoreo/assets", file), "utf8"));
   const tick = (ms) => {
     const until = now + ms;

@@ -1,4 +1,4 @@
-# First release checklist
+# Release checklist for the unpublished 1.0 candidate
 
 The local artifacts are prepared separately from publishing. A successful build
 does not mean a GitHub repository or PyPI project already exists.
@@ -52,6 +52,8 @@ python examples/missing_values.py
 python examples/classroom.py
 python examples/float_precision.py
 python examples/blank_strings.py
+python examples/retail_workflow.py
+python examples/reshape_workflow.py
 python examples/large_analysis.py --rows 2000
 python -m build
 python -m twine check dist/*
@@ -60,3 +62,16 @@ python tests/check_distribution.py
 
 For the notebook path, install `.[notebook]`, run `python tests/check_notebook.py`,
 and open `examples/notebook.ipynb` in JupyterLab to inspect the embedded controls.
+
+## Candidate status
+
+The current version is `1.0.0rc1`; it is a local candidate and has not been uploaded.
+The public Python surface and migration boundaries are in [the 1.0 guide](v1.md).
+Generated HTML carries the bundled player's MIT notice separately from the user's
+content. This does not complete account setup, verified public URLs, a Git-history
+privacy review, remote CI, or installation from a real published release.
+
+Before changing the candidate version to `1.0.0`, review the recorded verification,
+resolve any remaining release issues, rebuild from that exact source, and run the
+fresh-install check again. Package classifiers do not turn a version into a prerelease;
+the version string and runtime `__version__` must agree.

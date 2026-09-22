@@ -1,4 +1,4 @@
-"""Small, explicit pandas operations with immutable snapshots and local provenance."""
+"""Explicit pandas workflows with immutable snapshots and local provenance."""
 
 from __future__ import annotations
 
@@ -17,8 +17,9 @@ import pandas as pd
 
 from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
+from .profile import profile_frame
 
-VERSION = "0.1.0"
+VERSION = "1.0.0rc1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +133,7 @@ def _row_values(frame: pd.DataFrame) -> Iterator[tuple[Any, ...]]:
 
 
 class DataStory:
-    """Capture small transformations and export a network-independent HTML player.
+    """Capture explicit workflows and export a network-independent HTML player.
 
     All recorded ancestor data is included in an export, including filtered-out
     rows. Review the data before sharing the resulting file.
@@ -147,6 +148,8 @@ class DataStory:
         max_steps: int = 20,
         max_export_bytes: int = 2_000_000,
         max_cells: int | None = None,
+        language: str = "en",
+        description: str = "",
     ) -> None:
         self.title = title
         self.max_rows = max_rows
@@ -154,6 +157,8 @@ class DataStory:
         self.max_steps = max_steps
         self.max_export_bytes = max_export_bytes
         self.max_cells = max_cells
+        self.language = language
+        self.description = description
         self._steps: list[_Step] = []
         self._step_index: dict[str, _Step] = {}
         self._recorded_cells = 0
@@ -169,6 +174,8 @@ class DataStory:
         max_steps: int = 50,
         max_export_bytes: int = 128_000_000,
         max_cells: int = 2_000_000,
+        language: str = "en",
+        description: str = "",
     ) -> DataStory:
         """Opt into larger captures while bounding the total cells across snapshots."""
         return cls(
@@ -178,7 +185,29 @@ class DataStory:
             max_steps=max_steps,
             max_export_bytes=max_export_bytes,
             max_cells=max_cells,
+            language=language,
+            description=description,
         )
+
+    @property
+    def language(self) -> str:
+        return self._language
+
+    @language.setter
+    def language(self, value: str) -> None:
+        if not isinstance(value, str) or value not in ("en", "ja"):
+            raise ValueError("language must be 'en' or 'ja'")
+        self._language = value
+
+    @property
+    def description(self) -> str:
+        return self._description
+
+    @description.setter
+    def description(self, value: str) -> None:
+        if not isinstance(value, str) or len(value) > 2000:
+            raise ValueError("description must be a string of at most 2000 characters")
+        self._description = validate_text(value)
 
     @property
     def title(self) -> str:
@@ -297,6 +326,56 @@ class DataStory:
         chosen_name = name if name is not None else f"Table {len(self._steps) + 1}"
         return self._add(frame, name=chosen_name, operation="source", label=chosen_name)
 
+    def concat(
+        self,
+        frames: Sequence[StoryFrame],
+        *,
+        join: str = "outer",
+        ignore_index: bool = True,
+        label: str = "Combine rows",
+    ) -> StoryFrame:
+        """Stack recorded tables. Missing schema fields have no invented input cell."""
+        if isinstance(frames, (str, Mapping, Set)):
+            raise ValueError("frames must be an ordered sequence of recorded tables")
+        frames = list(frames)
+        if not frames or any(not isinstance(f, StoryFrame) or f._story is not self for f in frames):
+            raise ValueError("frames must contain tables from the same story")
+        if (
+            not isinstance(join, str)
+            or join not in ("outer", "inner")
+            or not isinstance(ignore_index, bool)
+        ):
+            raise ValueError("join must be outer/inner and ignore_index must be a boolean")
+        if sum(len(f._snapshot.frame) for f in frames) > self.max_rows:
+            raise CaptureLimitError("Concatenation exceeds max_rows")
+        output = pd.concat(
+            [f.to_pandas() for f in frames], join=join, ignore_index=ignore_index, sort=False
+        )
+        row_parents, cell_parents = [], []
+        for f in frames:
+            for i in range(len(f._snapshot.frame)):
+                row_parents.append((_RowRef(f.step_id, i),))
+                cell_parents.append(
+                    {
+                        c: (_CellRef(f.step_id, i, c),) if c in f._snapshot.frame.columns else ()
+                        for c in output.columns
+                    }
+                )
+        return self._add(
+            output,
+            name="Combined rows",
+            operation="concat",
+            label=label,
+            parents=tuple(dict.fromkeys(f.step_id for f in frames)),
+            row_parents=tuple(row_parents),
+            cell_parents=tuple(cell_parents),
+            parameters={
+                "inputs": [f.step_id for f in frames],
+                "join": join,
+                "ignore_index": ignore_index,
+            },
+        )
+
     def _result(self, result: StoryFrame | None) -> str | None:
         if result is None:
             return self._steps[-1].id if self._steps else None
@@ -312,6 +391,7 @@ class DataStory:
         note: str = "",
         hold: float = 2.8,
         highlight: str | Sequence[str] = (),
+        chapter: str = "",
     ) -> None:
         """Set a step's presentation without recalculating or changing its data.
 
@@ -324,6 +404,9 @@ class DataStory:
         if not isinstance(note, str) or len(note) > 600:
             raise ValueError("note must be a string of at most 600 characters")
         validate_text(note)
+        if not isinstance(chapter, str) or len(chapter) > 100:
+            raise ValueError("chapter must be a string of at most 100 characters")
+        validate_text(chapter)
         if isinstance(hold, bool) or not isinstance(hold, (int, float)):
             raise ValueError("hold must be between 1 and 30 seconds")
         if not 1 <= hold <= 30 or not math.isfinite(hold):
@@ -333,6 +416,7 @@ class DataStory:
             "note": note,
             "hold_ms": round(hold * 1000),
             "highlight": columns,
+            **({"chapter": chapter} if chapter else {}),
         }
 
     def _export_plan(self, result: StoryFrame | None) -> tuple[dict[str, Any], list[_Step]]:
@@ -351,6 +435,8 @@ class DataStory:
             "library_version": VERSION,
             "pandas_version": pd.__version__,
             "title": self.title,
+            "language": self.language,
+            "description": self.description,
             "result": result_id,
             "timeline": timeline,
         }, [step for step in self._steps if step.id in required]
@@ -367,6 +453,7 @@ class DataStory:
             "parents": list(step.parents),
             "parameters": copy.deepcopy(step.parameters),
             "presentation": copy.deepcopy(presentation),
+            "profile": profile_frame(step.frame),
         }
 
     @staticmethod
@@ -450,7 +537,13 @@ class DataStory:
 
         if self._result(result) is None:
             raise ValueError("Add a table before exporting HTML")
-        return render_html(self.to_json(result=result), self.title, theme, compression=compression)
+        return render_html(
+            self.to_json(result=result),
+            self.title,
+            theme,
+            compression=compression,
+            language=self.language,
+        )
 
     def export_html(
         self,
@@ -487,12 +580,12 @@ class DataStory:
         from .export import notebook_html, notebook_placeholder
 
         if not self._steps:
-            return notebook_placeholder(self.title)
+            return notebook_placeholder(self.title, self.language)
         return notebook_html(self.to_html(), self.title)
 
 
 class StoryFrame:
-    """An immutable recorded step, with a small explicit operation surface."""
+    """An immutable recorded step, with an explicit operation surface."""
 
     def __init__(self, story: DataStory, step_id: str) -> None:
         if not isinstance(story, DataStory):
@@ -513,6 +606,10 @@ class StoryFrame:
         """Return a copy, so changes cannot mutate the recorded history."""
         return _detached_copy(self._snapshot.frame)
 
+    def profile(self) -> dict[str, Any]:
+        """Return a detached summary of dtypes, missingness, uniqueness and duplicate rows."""
+        return profile_frame(self._snapshot.frame)
+
     def _record_rows(
         self,
         output: pd.DataFrame,
@@ -530,7 +627,7 @@ class StoryFrame:
                 "select": "Selected columns",
                 "rename": "Renamed columns",
                 "calculate": "Calculated column",
-            }[operation],
+            }.get(operation, operation.replace("_", " ").capitalize()),
             operation=operation,
             label=label,
             parents=(self.step_id,),
@@ -622,6 +719,418 @@ class StoryFrame:
             positions=range(len(df)),
             columns={names.get(c, c): (c,) for c in df.columns},
             parameters={"mapping": names},
+        )
+
+    def drop_missing(
+        self,
+        *,
+        subset: str | Sequence[str] | None = None,
+        how: str = "any",
+        label: str = "Remove missing rows",
+    ) -> StoryFrame:
+        """Remove rows missing any/all of the chosen fields, using pandas semantics."""
+        df = self.to_pandas()
+        columns = list(df.columns) if subset is None else _keys(subset, df.columns)
+        if not isinstance(how, str) or how not in ("any", "all"):
+            raise ValueError("how must be 'any' or 'all'")
+        absent = df[columns].isna()
+        removed = absent.any(axis=1) if how == "any" else absent.all(axis=1)
+        positions = np.flatnonzero(~removed.to_numpy()).tolist()
+        return self._record_rows(
+            df.iloc[positions],
+            operation="drop_missing",
+            label=label,
+            positions=positions,
+            columns={c: (c,) for c in df.columns},
+            parameters={
+                "subset": columns,
+                "how": how,
+                "positions": positions,
+                "removed_rows": len(df) - len(positions),
+            },
+        )
+
+    def drop_duplicates(
+        self,
+        *,
+        subset: str | Sequence[str] | None = None,
+        keep: str | bool = "first",
+        label: str = "Remove duplicate rows",
+    ) -> StoryFrame:
+        """Deduplicate by value while retaining exact positional identities."""
+        df = self.to_pandas()
+        columns = list(df.columns) if subset is None else _keys(subset, df.columns)
+        if keep is not False and keep not in ("first", "last"):
+            raise ValueError("keep must be first, last, or False")
+        positions = np.flatnonzero(~df.duplicated(subset=columns, keep=keep).to_numpy()).tolist()
+        return self._record_rows(
+            df.iloc[positions],
+            operation="drop_duplicates",
+            label=label,
+            positions=positions,
+            columns={c: (c,) for c in df.columns},
+            parameters={
+                "subset": columns,
+                "keep": keep,
+                "positions": positions,
+                "removed_rows": len(df) - len(positions),
+            },
+        )
+
+    def fill_missing(
+        self, values: Mapping[str, Any], *, label: str = "Fill missing values"
+    ) -> StoryFrame:
+        """Fill chosen fields with explicit constants, which are not invented source cells."""
+        df = self.to_pandas()
+        if not isinstance(values, Mapping) or not values:
+            raise ValueError("values must map existing columns to non-missing scalar constants")
+        columns = _keys(list(values), df.columns)
+        constants = {c: encode_cell(values[c]) for c in columns}
+        if any(v["type"] == "missing" for v in constants.values()):
+            raise ValueError("Fill constants must not be missing")
+        filled = {c: np.flatnonzero(df[c].isna().to_numpy()).tolist() for c in columns}
+        output = df.fillna(dict(values))
+        positions = {c: set(rows) for c, rows in filled.items()}
+        return self._story._add(
+            output,
+            name="Filled values",
+            operation="fill_missing",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {
+                    c: () if i in positions.get(c, ()) else (_CellRef(self.step_id, i, c),)
+                    for c in df.columns
+                }
+                for i in range(len(df))
+            ),
+            parameters={"values": constants, "filled_positions": filled},
+        )
+
+    def take_rows(self, positions: Sequence[int], *, label: str = "Choose rows") -> StoryFrame:
+        """Select explicit nonnegative row positions; order and repeated uses are preserved."""
+        if isinstance(positions, (str, Mapping, Set)):
+            raise ValueError("positions must be an ordered sequence of row numbers")
+        chosen = list(positions)
+        if any(
+            isinstance(i, (bool, np.bool_)) or not isinstance(i, (int, np.integer)) for i in chosen
+        ):
+            raise ValueError("positions must contain integers")
+        if any(i < 0 or i >= len(self._snapshot.frame) for i in chosen):
+            raise IndexError("A requested row position is outside the table")
+        if len(chosen) > self._story.max_rows:
+            raise CaptureLimitError("Selected rows exceed max_rows")
+        chosen = [int(i) for i in chosen]
+        df = self.to_pandas()
+        return self._record_rows(
+            df.iloc[chosen],
+            operation="take",
+            label=label,
+            positions=chosen,
+            columns={c: (c,) for c in df.columns},
+            parameters={"positions": chosen},
+        )
+
+    def astype(
+        self, mapping: Mapping[str, str], *, label: str = "Change column types"
+    ) -> StoryFrame:
+        """Convert fields using explicit pandas dtype names and errors='raise'."""
+        df = self.to_pandas()
+        if not isinstance(mapping, Mapping) or not mapping:
+            raise ValueError("mapping must contain column names and dtype strings")
+        _keys(list(mapping), df.columns)
+        if any(not isinstance(dtype, str) or not dtype.strip() for dtype in mapping.values()):
+            raise ValueError("Each target dtype must be a nonempty string")
+        return self._record_rows(
+            df.astype(dict(mapping)),
+            operation="astype",
+            label=label,
+            positions=range(len(df)),
+            columns={c: (c,) for c in df.columns},
+            parameters={"mapping": dict(mapping)},
+        )
+
+    def to_numeric(
+        self,
+        columns: str | Sequence[str],
+        *,
+        errors: str = "raise",
+        label: str = "Parse numeric values",
+    ) -> StoryFrame:
+        """Parse numbers. A coerced missing value still points to the original input text."""
+        df = self.to_pandas()
+        chosen = _keys(columns, df.columns)
+        if not isinstance(errors, str) or errors not in ("raise", "coerce"):
+            raise ValueError("errors must be raise or coerce")
+        for c in chosen:
+            df[c] = pd.to_numeric(df[c], errors=errors)
+        return self._record_rows(
+            df,
+            operation="to_numeric",
+            label=label,
+            positions=range(len(df)),
+            columns={c: (c,) for c in df.columns},
+            parameters={"columns": chosen, "errors": errors},
+        )
+
+    def to_datetime(
+        self,
+        columns: str | Sequence[str],
+        *,
+        format: str,
+        errors: str = "raise",
+        utc: bool = False,
+        label: str = "Parse date values",
+    ) -> StoryFrame:
+        """Parse dates using an explicit format; timezone normalization is opt-in."""
+        df = self.to_pandas()
+        chosen = _keys(columns, df.columns)
+        _text(format, "format", 200)
+        if (
+            not isinstance(errors, str)
+            or errors not in ("raise", "coerce")
+            or not isinstance(utc, bool)
+        ):
+            raise ValueError("errors must be raise/coerce and utc must be a boolean")
+        for c in chosen:
+            df[c] = pd.to_datetime(df[c], format=format, errors=errors, utc=utc)
+        return self._record_rows(
+            df,
+            operation="to_datetime",
+            label=label,
+            positions=range(len(df)),
+            columns={c: (c,) for c in df.columns},
+            parameters={"columns": chosen, "format": format, "errors": errors, "utc": utc},
+        )
+
+    def string_transform(
+        self, columns: str | Sequence[str], *, op: str, label: str = "Normalize text"
+    ) -> StoryFrame:
+        """Apply strip/lower/upper/casefold to string-or-missing columns."""
+        df = self.to_pandas()
+        chosen = _keys(columns, df.columns)
+        if not isinstance(op, str) or op not in ("strip", "lower", "upper", "casefold"):
+            raise ValueError("op must be strip, lower, upper, or casefold")
+        for c in chosen:
+            if any(not isinstance(v, str) for v in df[c].dropna().array):
+                raise UnsupportedDataError("string_transform requires strings or missing values")
+            if len(df[c].dropna()):
+                df[c] = getattr(df[c].str, op)()
+        return self._record_rows(
+            df,
+            operation="string_transform",
+            label=label,
+            positions=range(len(df)),
+            columns={c: (c,) for c in df.columns},
+            parameters={"columns": chosen, "op": op},
+        )
+
+    def melt(
+        self,
+        *,
+        id_vars: str | Sequence[str],
+        value_vars: str | Sequence[str],
+        var_name: str = "variable",
+        value_name: str = "value",
+        label: str = "Unpivot columns into rows",
+    ) -> StoryFrame:
+        """Convert an explicit set of value columns to long form (ignore_index=True)."""
+        df = self.to_pandas()
+        ids = _keys(id_vars, df.columns, allow_empty=True)
+        values = _keys(value_vars, df.columns)
+        if set(ids) & set(values):
+            raise ValueError("id_vars and value_vars must not overlap")
+        if any(not isinstance(c, str) or not c.strip() for c in [var_name, value_name]):
+            raise ValueError("Output column names must be nonempty strings")
+        if var_name == value_name or var_name in ids or value_name in df.columns:
+            raise ValueError("melt output column names must be distinct and unused")
+        if len(df) * len(values) > self._story.max_rows:
+            raise CaptureLimitError("Melt exceeds max_rows")
+        output = df.melt(
+            id_vars=ids,
+            value_vars=values,
+            var_name=var_name,
+            value_name=value_name,
+            ignore_index=True,
+        )
+        row_parents, cell_parents = [], []
+        for column in values:
+            for i in range(len(df)):
+                row_parents.append((_RowRef(self.step_id, i),))
+                cell_parents.append(
+                    {
+                        **{c: (_CellRef(self.step_id, i, c),) for c in ids},
+                        var_name: (),
+                        value_name: (_CellRef(self.step_id, i, column),),
+                    }
+                )
+        return self._story._add(
+            output,
+            name="Long table",
+            operation="melt",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple(row_parents),
+            cell_parents=tuple(cell_parents),
+            parameters={
+                "id_vars": ids,
+                "value_vars": values,
+                "var_name": var_name,
+                "value_name": value_name,
+            },
+        )
+
+    def pivot(
+        self,
+        *,
+        index: str | Sequence[str],
+        columns: str,
+        values: str,
+        label: str = "Pivot rows into columns",
+    ) -> StoryFrame:
+        """Pivot unique key pairs without aggregation; pivoted column labels must be strings."""
+        df = self.to_pandas()
+        keys = _keys(index, df.columns)
+        _keys([columns, values], df.columns)
+        if columns in keys or values in keys:
+            raise ValueError("index, columns, and values must name distinct fields")
+        names = df[columns].drop_duplicates().tolist()
+        if any(not isinstance(c, str) or not c.strip() or c in keys for c in names):
+            raise UnsupportedDataError(
+                "Pivot labels must be nonempty strings outside the index names"
+            )
+        if len(keys) + len(names) > self._story.max_columns:
+            raise CaptureLimitError("Pivot exceeds max_columns")
+        wide = df.pivot(index=keys, columns=columns, values=values)
+        output = wide.reset_index()
+        marker = object()
+        source = df[[*keys, columns]].copy()
+        source[marker] = np.arange(len(df), dtype=np.int64)
+        positions = source.pivot(index=keys, columns=columns, values=marker).reindex(
+            index=wide.index, columns=wide.columns
+        )
+        row_parents, cell_parents = [], []
+        for i in range(len(output)):
+            available = sorted(int(x) for x in positions.iloc[i] if not pd.isna(x))
+            row_parents.append(tuple(_RowRef(self.step_id, j) for j in available))
+            refs = {c: tuple(_CellRef(self.step_id, j, c) for j in available) for c in keys}
+            for j, name in enumerate(wide.columns):
+                position = positions.iat[i, j]
+                refs[name] = (
+                    () if pd.isna(position) else (_CellRef(self.step_id, int(position), values),)
+                )
+            cell_parents.append(refs)
+        return self._story._add(
+            output,
+            name="Wide table",
+            operation="pivot",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple(row_parents),
+            cell_parents=tuple(cell_parents),
+            parameters={
+                "index": keys,
+                "columns": columns,
+                "values": values,
+                "output_columns": list(wide.columns),
+            },
+        )
+
+    def group_agg(
+        self,
+        *,
+        by: str | Sequence[str],
+        aggregations: Mapping[str, tuple[str, str]],
+        dropna: bool,
+        sort: bool = False,
+        min_count: int = 1,
+        label: str = "Summarize groups",
+    ) -> StoryFrame:
+        """Named sum/mean/min/max/median/count/nunique metrics in a single grouping."""
+        df = self.to_pandas()
+        keys = _keys(by, df.columns)
+        if not isinstance(aggregations, Mapping) or not aggregations:
+            raise ValueError("aggregations must map result names to (column, reducer)")
+        if not isinstance(dropna, bool) or not isinstance(sort, bool):
+            raise ValueError("dropna and sort must be booleans")
+        if (
+            isinstance(min_count, bool)
+            or not isinstance(min_count, int)
+            or not 0 <= min_count <= 2**53 - 1
+        ):
+            raise ValueError("min_count must be an integer from 0 through 2**53 - 1")
+        metrics = []
+        for name, spec in aggregations.items():
+            if not isinstance(name, str) or not name.strip() or name in keys:
+                raise ValueError("Metric names must be nonempty and distinct from grouping keys")
+            if not isinstance(spec, (tuple, list)) or len(spec) != 2:
+                raise ValueError("Each metric must be (column, reducer)")
+            column, agg = spec
+            self._group_keys_and_value(df, keys, column)
+            if not isinstance(agg, str) or agg not in (
+                "sum",
+                "mean",
+                "min",
+                "max",
+                "median",
+                "count",
+                "nunique",
+            ):
+                raise ValueError("Unsupported named reducer")
+            if agg in ("sum", "mean", "median") and (
+                not pd.api.types.is_numeric_dtype(df[column].dtype)
+                or pd.api.types.is_bool_dtype(df[column].dtype)
+            ):
+                raise UnsupportedDataError("This reducer requires a numeric, non-boolean column")
+            metrics.append({"output": name, "column": column, "agg": agg})
+        grouped = df.groupby(keys, dropna=dropna, sort=sort, observed=True)
+        results = []
+        for m in metrics:
+            values = grouped[m["column"]]
+            series = (
+                values.sum(min_count=min_count)
+                if m["agg"] == "sum"
+                else getattr(values, m["agg"])()
+            )
+            results.append(series.rename(m["output"]))
+        output = pd.concat(results, axis=1).reset_index()
+        group_ids = grouped.ngroup().to_numpy()
+        members: list[list[int]] = [[] for _ in range(len(output))]
+        for i, group in enumerate(group_ids):
+            if not pd.isna(group):
+                members[int(group)].append(i)
+        present = {m["column"]: df[m["column"]].notna().to_numpy(dtype=bool) for m in metrics}
+        return self._story._add(
+            output,
+            name="Grouped metrics",
+            operation="group_agg",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple(tuple(_RowRef(self.step_id, j) for j in rows) for rows in members),
+            cell_parents=tuple(
+                {
+                    **{c: tuple(_CellRef(self.step_id, j, c) for j in rows) for c in keys},
+                    **{
+                        m["output"]: tuple(
+                            _CellRef(self.step_id, j, m["column"])
+                            for j in rows
+                            if present[m["column"]][j]
+                        )
+                        for m in metrics
+                    },
+                }
+                for rows in members
+            ),
+            parameters={
+                "by": keys,
+                "metrics": metrics,
+                "dropna": dropna,
+                "sort": sort,
+                "min_count": min_count,
+                "groups": [{"output_row": i, "input_rows": rows} for i, rows in enumerate(members)],
+                "excluded_rows": int(pd.isna(group_ids).sum()),
+            },
         )
 
     def calculate(
@@ -729,18 +1238,28 @@ class StoryFrame:
         self,
         right: StoryFrame,
         *,
-        on: str | Sequence[str],
+        on: str | Sequence[str] | None = None,
+        left_on: str | Sequence[str] | None = None,
+        right_on: str | Sequence[str] | None = None,
         how: str = "left",
         validate: str = "many_to_one",
         suffixes: tuple[str, str] = ("_x", "_y"),
         label: str = "Join tables",
     ) -> StoryFrame:
+        """Validated left/inner/right/outer joins with explicit matching fields."""
         if not isinstance(right, StoryFrame) or right._story is not self._story:
             raise ValueError("Both tables must belong to the same story")
-        if how not in {"left", "inner"}:
-            raise ValueError("how must be 'left' or 'inner'")
-        if validate not in {"many_to_one", "one_to_one", "m:1", "1:1"}:
-            raise ValueError("validate must be 'many_to_one' or 'one_to_one'")
+        if not isinstance(how, str) or how not in ("left", "inner", "right", "outer"):
+            raise ValueError("how must be left, inner, right, or outer")
+        if not isinstance(validate, str) or validate not in (
+            "many_to_one",
+            "one_to_one",
+            "one_to_many",
+            "m:1",
+            "1:1",
+            "1:m",
+        ):
+            raise ValueError("validate must be many_to_one, one_to_one, or one_to_many")
         if (
             not isinstance(suffixes, (tuple, list))
             or len(suffixes) != 2
@@ -748,46 +1267,63 @@ class StoryFrame:
         ):
             raise ValueError("suffixes must contain two strings")
         left_df, right_df = self.to_pandas(), right.to_pandas()
-        keys = _keys(on, left_df.columns)
-        _keys(keys, right_df.columns)
-        output = left_df.merge(
-            right_df, on=keys, how=how, validate=validate, sort=False, suffixes=suffixes
-        )
+        if on is not None:
+            if left_on is not None or right_on is not None:
+                raise ValueError("Specify on or left_on/right_on, not both")
+            left_keys = _keys(on, left_df.columns)
+            right_keys = _keys(left_keys, right_df.columns)
+            matching = {"on": left_keys}
+        else:
+            if left_on is None or right_on is None:
+                raise ValueError("Specify on or both left_on and right_on")
+            left_keys, right_keys = (
+                _keys(left_on, left_df.columns),
+                _keys(right_on, right_df.columns),
+            )
+            if len(left_keys) != len(right_keys):
+                raise ValueError("Join key lists must have equal length")
+            matching = {"left_on": left_keys, "right_on": right_keys}
+        options = dict(how=how, validate=validate, sort=False, suffixes=suffixes, **matching)
         left_marker, right_marker = object(), object()
-        left_columns, right_columns = list(left_df.columns), list(right_df.columns)
-        left_df = left_df[keys].copy()
-        right_df = right_df[keys].copy()
-        left_df[left_marker] = np.arange(len(left_df))
-        right_df[right_marker] = np.arange(len(right_df))
-        mapping = left_df.merge(
-            right_df, on=keys, how=how, validate=validate, sort=False, suffixes=suffixes
-        )
+        left_map, right_map = left_df[left_keys].copy(), right_df[right_keys].copy()
+        left_map[left_marker] = np.arange(len(left_map))
+        right_map[right_marker] = np.arange(len(right_map))
+        mapping = left_map.merge(right_map, **options)
+        if len(mapping) > self._story.max_rows:
+            raise CaptureLimitError("Join result exceeds max_rows")
+        output = left_df.merge(right_df, **options)
         if len(mapping) != len(output):
             raise UnsupportedDataError("Could not align the join result with its source rows")
-        left_indices = mapping[left_marker].tolist()
-        right_indices = mapping[right_marker].tolist()
-        overlap = (set(left_columns) & set(right_columns)) - set(keys)
-        row_parents = []
-        cell_parents = []
-        unmatched = 0
-        for li, ri in zip(left_indices, right_indices, strict=True):
-            li = int(li)
+        common = {
+            left for left, right_key in zip(left_keys, right_keys, strict=True) if left == right_key
+        }
+        overlap = (set(left_df.columns) & set(right_df.columns)) - common
+        row_parents, cell_parents = [], []
+        no_left = no_right = 0
+        for li, ri in zip(mapping[left_marker].array, mapping[right_marker].array, strict=True):
+            li = None if pd.isna(li) else int(li)
             ri = None if pd.isna(ri) else int(ri)
-            refs = [_RowRef(self.step_id, li)]
+            no_left += li is None
+            no_right += ri is None
+            refs = []
+            if li is not None:
+                refs.append(_RowRef(self.step_id, li))
             if ri is not None:
                 refs.append(_RowRef(right.step_id, ri))
-            else:
-                unmatched += 1
             row_parents.append(tuple(refs))
             cells = {}
-            for c in left_columns:
+            for c in left_df.columns:
                 out = c + suffixes[0] if c in overlap else c
-                cells[out] = (_CellRef(self.step_id, li, c),)
-            for c in right_columns:
-                if c in keys:
-                    continue
-                out = c + suffixes[1] if c in overlap else c
-                cells[out] = (_CellRef(right.step_id, ri, c),) if ri is not None else ()
+                if li is not None:
+                    cells[out] = (_CellRef(self.step_id, li, c),)
+                elif c in common and ri is not None:
+                    cells[out] = (_CellRef(right.step_id, ri, c),)
+                else:
+                    cells[out] = ()
+            for c in right_df.columns:
+                if c not in common:
+                    out = c + suffixes[1] if c in overlap else c
+                    cells[out] = (_CellRef(right.step_id, ri, c),) if ri is not None else ()
             cell_parents.append(cells)
         return self._story._add(
             output,
@@ -798,11 +1334,14 @@ class StoryFrame:
             row_parents=tuple(row_parents),
             cell_parents=tuple(cell_parents),
             parameters={
-                "on": keys,
+                "on": left_keys if on is not None else None,
+                "left_on": left_keys,
+                "right_on": right_keys,
                 "how": how,
                 "validate": validate,
                 "suffixes": list(suffixes),
-                "unmatched_rows": unmatched,
+                "unmatched_rows": no_right,
+                "unmatched_left_rows": no_left,
             },
         )
 

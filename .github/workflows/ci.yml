@@ -51,6 +51,8 @@ jobs:
       - run: python examples/blank_strings.py
       - run: python examples/group_aggregates.py
       - run: python examples/motion_showcase.py
+      - run: python examples/retail_workflow.py
+      - run: python examples/reshape_workflow.py
       - run: python examples/large_analysis.py --rows 2000
       - run: python -m build
       - run: python -m twine check dist/*

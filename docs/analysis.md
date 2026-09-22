@@ -117,7 +117,7 @@ repeats the transition through its preceding scene; expanded views and reduced
 motion disable replay. Play/pause and speed apply to value and row movement.
 Selecting a value, scrolling, resizing, changing views, or expanding the code
 settles any movement whose geometry is no longer current. The reader's and OS
-reduced-motion preferences remain effective. **Python operation** opens the recorded
+reduced-motion preferences remain effective. **Operation details** opens the recorded
 operation without executing it.
 
 ## Browsing and tracing
@@ -180,4 +180,4 @@ HTML file. This describes that synthetic workflow, not every 50,000-row dataset.
 Performance varies with data and hardware. The implementation still stores snapshots
 in memory and parses the whole story in the browser. Pagination bounds rendered rows,
 not total data storage. Million-row workloads, disk-backed capture, Polars, arbitrary
-aggregation, pivot/melt, and video export remain outside this implementation.
+aggregation, arbitrary pivot-table callbacks and video export remain outside this implementation.

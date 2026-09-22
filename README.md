@@ -1,17 +1,19 @@
 # FrameChoreo
 
-**Turn small pandas transformations into portable, traceable animations.**
+**Explain pandas workflows with interactive tables, comparisons, charts, and value provenance.**
 
-Rows move through filters, joins, and grouped sums. Readers can pause, move between
-steps, select a value, and inspect the source cells behind it. The exported HTML
+Record cleaning, conversions, joins, reshaping, and grouped metrics. Readers can
+follow values in motion, compare before and after, inspect data quality, search
+records, switch to a chart, and trace each value to its recorded inputs. The exported HTML
 contains its player and recorded data: no Python server, account, or network access
 is needed to replay it.
 
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
-FrameChoreo is an early library for teachers, technical writers,
-and developers explaining a data transformation. It does not trace arbitrary pandas
-code or replace a production data-lineage platform.
+FrameChoreo is for teachers, technical writers, and analysts explaining how a
+result was made. **1.0.0rc1 is a local release candidate; it has not been published.**
+Operations are explicit and their results follow pandas. [The 1.0 guide](docs/v1.md)
+defines the supported workflow, reader features, and compatibility boundaries.
 
 ## Install
 
@@ -25,7 +27,7 @@ python -m pip install .
 Or install the prepared wheel:
 
 ```sh
-python -m pip install dist/framechoreo-0.1.0-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc1-py3-none-any.whl
 ```
 
 If you installed an earlier unreleased wheel with the same version, add
@@ -90,20 +92,28 @@ Exports refuse to replace existing files unless `overwrite=True` is supplied.
 In a trusted Jupyter notebook, displaying `total` or `story` uses a sandboxed
 iframe through `_repr_html_()`.
 
-## Supported in 0.1
+## Operation coverage
 
 | Operation | Contract |
 |---|---|
 | `table(df)` | Copies a source DataFrame; supports unique, nonempty string column names and scalar cells |
 | `filter_rows(predicate)` | Evaluates a callable once on a copy, or accepts a boolean mask; rejects input mutation and ambiguous Series alignment |
-| `merge(right, on=...)` | Explicit keys, inner/left joins, one-to-one or many-to-one validation; uses pandas null-key behavior |
+| `merge(...)` | Left/inner/right/outer; shared or different key names; one-to-one, many-to-one, or one-to-many validation |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
 | `group_mean(by=..., value=..., dropna=...)` | Numeric non-boolean values; a group with no non-missing values is missing, since pandas skips missing values with no `min_count` to set |
 | `group_count(by=..., value=..., dropna=...)` | Counts non-missing entries of any supported column type per group; this is not the row count, and a fully missing group counts as zero |
 | `calculate(name, left=..., op=..., right=...)` | Row-wise add/subtract/multiply/divide with a numeric column or scalar; records actual operands |
 | `sort_values(by, ...)` | Stable sorting with retained positional provenance |
 | `select_columns([...])` / `rename_columns({...})` | Choose, reorder, and rename columns while retaining their inputs |
-| `annotate(frame, ...)` | Adds a note, playback hold time, and highlighted columns without changing calculations |
+| `drop_missing(...)` / `fill_missing({...})` | Explicit removal or scalar imputation, with a distinction between original values and introduced constants |
+| `drop_duplicates(...)` / `take_rows([...])` | Native duplicate policies and explicit row selection, including repeated positions |
+| `astype({...})` / `to_numeric(...)` / `to_datetime(...)` | Explicit types and parsing policies; dates require a format |
+| `string_transform(..., op=...)` | Strip, lower, upper, and casefold for string-or-missing fields |
+| `story.concat([...])` | Vertical combination, inner/outer column alignment, and multiple recorded inputs |
+| `melt(...)` / `pivot(...)` | Long/wide reshaping with exact positional value references; pivot does not aggregate |
+| `group_agg(...)` | Named sum, mean, min, max, median, count, and nunique metrics in one step |
+| `profile()` | Native missing, unique, duplicate, and dtype summaries, detached from the snapshot |
+| `annotate(frame, ...)` | Adds a note, chapter, playback hold time, and highlighted columns without changing calculations |
 | `explain(row, column)` | Returns source value inputs, preserving repeated use of the same source cell |
 | `explain_page(row, column, offset=..., limit=...)` | Bounded pages with exact totals, including repeated use of an aggregate |
 | `to_html` / `export_html` | Self-contained player; light, dark, or automatic theme |
@@ -160,8 +170,8 @@ embedded and displayed as text. Input callbacks are trusted Python code, not a s
 
 - This is an explicit wrapper, not an automatic tracer. Raw pandas operations on
   `frame.to_pandas()` are not recorded.
-- No many-to-many joins, pivot, melt, arbitrary aggregations, Polars, GIF, or MP4
-  export in this release.
+- Many-to-many joins, arbitrary aggregation callbacks, nested-object expansion,
+  Polars, GIF, and MP4 export are outside this release candidate.
 - Large integer values are encoded as strings for browser display. Arithmetic,
   including dtype and overflow behavior, follows pandas.
 - Nested objects, bytes, complex numbers, duplicate columns, and non-string column
@@ -177,8 +187,8 @@ embedded and displayed as text. Input callbacks are trusted Python code, not a s
 - A filter records which rows remain, not every cell read by arbitrary Python code.
   Sum explanations omit missing numeric inputs; group membership and `min_count`
   remain in the operation record.
-- Story JSON is versioned but experimental. Self-contained HTML bundles its matching
-  player; pin the library version if another tool consumes the JSON.
+- Story JSON is a versioned display model, not a pandas round-trip serializer.
+  Self-contained HTML bundles its matching player; pin the version for direct JSON integration.
 
 ## Run the examples
 
@@ -190,6 +200,8 @@ python examples/float_precision.py
 python examples/blank_strings.py
 python examples/group_aggregates.py
 python examples/motion_showcase.py
+python examples/retail_workflow.py
+python examples/reshape_workflow.py
 python examples/large_analysis.py --rows 5000
 ```
 
@@ -203,7 +215,18 @@ The motion showcase follows a small Japanese sales example through filtering,
 sorting, joining, and summing. Join values travel from labeled source cards to
 their recorded destinations; non-missing aggregate inputs converge into the result.
 Group numbers accompany the colors. **Replay the movement** repeats a transition,
-and **Python operation** opens its code. See [motion limits](docs/analysis.md#following-values-in-motion).
+and **Operation details** opens the recorded operation summary. See [motion limits](docs/analysis.md#following-values-in-motion).
+
+The retail workflow combines two monthly files, cleans them, joins a product catalog,
+and produces six named metrics. The reshape workflow follows monthly values through
+melt, grouped summaries, pivot, and a difference calculation. Both assert complete
+DataFrame equality with separate ordinary pandas pipelines.
+
+Use `DataStory(language="ja", description="...")` for Japanese controls. Column names,
+source names, labels, and notes remain authored content. Both themes, the searchable
+table, before/after comparison, quality panel, and inspectable chart work offline.
+Search and column visibility affect the view only. The HTML includes the MIT notice
+for the bundled player; it does not change the license of the data or narrative.
 
 For a complete notebook example, install the optional notebook tools from the
 source checkout and open [examples/notebook.ipynb](examples/notebook.ipynb):

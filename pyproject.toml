@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "framechoreo"
-version = "0.1.0"
-description = "Turn small pandas transformations into portable, traceable animations."
+version = "1.0.0rc1"
+description = "Record pandas workflows as interactive, traceable stories."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "miruky" }]
 keywords = ["pandas", "animation", "education", "dataframe", "lineage"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Intended Audience :: Education",
   "Programming Language :: Python :: 3",

@@ -1,7 +1,7 @@
 # Design and correctness boundaries
 
 FrameChoreo has four layers: pandas calculations, recorded correspondence, a
-JSON display model, and a bundled player. It is an explicit wrapper with a small
+JSON display model, and a bundled player. It is an explicit wrapper with a documented
 operation surface. It does not monkey-patch pandas or execute user code in the
 browser.
 
@@ -77,8 +77,8 @@ pages; source-use lists use 50-input pages and counted subtree skipping. The pla
 validates and indexes a story at load and reuses that index for inspection. Source
 highlighting uses reachable cells without expanding every repeated source use.
 
-The JSON schema is experimental in 0.x. Self-contained HTML includes the matching
-player and is the primary sharing format. No external font, CDN, telemetry, API
+JSON is a versioned display model; it is not a general pandas round-trip format.
+Self-contained HTML includes the matching player and is the primary sharing format. No external font, CDN, telemetry, API
 key, server, or third-party rendering service is used.
 
 ## Deliberate boundaries
@@ -90,3 +90,29 @@ operations remain unsupported instead of producing guessed provenance.
 
 The implementation is independent. Related work includes Pandas Tutor,
 Datamations, and ipyvizzu; their existence is acknowledged in the README.
+
+## Workflow and reader layers in the 1.0 candidate
+
+Cleaning selections retain positional identities. Conversions retain their original
+value inputs. Constant fills record the constant and its missing positions without
+inventing a raw value reference. Concatenation retains each input's identity, including
+repeated use and fields absent from an input. Melt labels come from the schema;
+pivot checks unique key pairs and maps each value position independently of index labels.
+Named metrics compute separate pandas reductions and keep separate candidate references.
+Reserved output names such as `func` do not become arguments to pandas `agg`.
+
+Profiles are pandas-native summaries, generated from immutable snapshots. The browser
+checks profile shape and missing counts. Uniqueness and duplicate statistics follow
+pandas, not approximate comparisons of display strings.
+
+`workbench.js` owns reader-only view state: search, visible fields, comparison,
+quality, and charts. The player retains calculation and lineage state. Returning from
+an origin restores the reader view as well as the recorded selection. Plot lengths
+are approximate, while value text and provenance are authoritative recordings. No
+recorded DataFrame is recomputed or edited in the browser.
+
+Movement uses recorded immediate cell references, measured visible endpoints, and
+a bounded number of tokens. Reshape labels and absent combinations do not create
+fake source cells. Group identity follows recorded row ancestry through sorting and
+other row-preserving operations. View changes settle movement rather than reuse stale
+coordinates. These are explanatory animations, not a simulation of pandas internals.

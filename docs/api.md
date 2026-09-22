@@ -4,7 +4,8 @@
 
 ```python
 DataStory(title="A data story", *, max_rows=200, max_columns=12,
-          max_steps=20, max_export_bytes=2_000_000, max_cells=None)
+          max_steps=20, max_export_bytes=2_000_000, max_cells=None,
+          language="en", description="")
 ```
 
 Limits are positive integers. Source tables count as recorded steps. Exceeding a
@@ -49,12 +50,14 @@ precisions; `examples/float_precision.py` demonstrates this with join keys.
 ### annotate
 
 ```python
-story.annotate(frame, note="Follow the amount column", hold=4, highlight=["amount"])
+story.annotate(
+    frame, note="Follow the amount column", hold=4, highlight=["amount"], chapter="Explain"
+)
 ```
 
 Replaces the presentation settings for that step. `note` is at most 600 characters;
 `hold` is a finite number of seconds from 1 through 30; `highlight` is a column name
-or a sequence of column names. Neither data nor lineage is recalculated. A grouped
+or a sequence of column names. `chapter` is an optional label of at most 100 characters. Neither data nor lineage is recalculated. A grouped
 sum creates grouping and summing scenes, both using the step's hold time. The note
 appears only in the summing scene, once the result exists.
 
@@ -163,14 +166,17 @@ joined = left.merge(
 ```
 
 Both frames must belong to the same story. `on` is one column or a sequence of
-columns present on both sides. `how` is `left` or `inner`. `validate` accepts
-`many_to_one`/`m:1` or `one_to_one`/`1:1`. `suffixes` contains two strings.
+columns present on both sides. `how` is `left`, `inner`, `right`, or `outer`. `validate` accepts
+`many_to_one`/`m:1`, `one_to_one`/`1:1`, or `one_to_many`/`1:m`. `suffixes` contains
+two strings. Use `left_on` and `right_on` instead of `on` for different key names;
+the key lists must have equal length. Many-to-many and cross joins are rejected.
 
 Pandas computes the result, including dtypes, index behavior, missing keys, and
 validation errors. A separate key-only merge carries private positional markers
 for correspondence. Markers never enter the returned DataFrame.
 
-The left side supplies output key-cell lineage; the right key is matching context,
+For shared keys, a matched row uses the left key as its value input. A right-only
+row uses the right key. Otherwise the right key is matching context,
 not another copy of the output value. A right-hand output cell with no match has
 no source value inputs. Pandas matches null keys with null keys; this is not SQL's
 usual null-join behavior.
@@ -279,3 +285,113 @@ list under `explain()`'s default 10,000-input limit.
 row positions use `IndexError`, and missing columns in `explain` use `KeyError`.
 Pandas operation exceptions, such as `pandas.errors.MergeError`, retain their type.
 Failed operations do not append a partial step.
+
+## Workflow operations (1.0 candidate)
+
+`language` is `en` or `ja`; `description` is plain text of at most 2,000 characters.
+They can be reassigned with validation. Neither translates authored data or changes results.
+
+### Quality profile
+
+`frame.profile()` returns a fresh dictionary with `rows`, `column_count`,
+`missing_cells`, `duplicate_rows`, and `columns`. Each column entry contains
+`name`, `dtype`, `missing`, and `unique`. Unique counts use pandas `nunique(dropna=True)`;
+duplicate rows use `duplicated()` across all columns, excluding the index.
+Profiles describe recorded tables, independently of a reader's search or hidden columns.
+
+### Cleaning and conversion
+
+```python
+frame.drop_missing(subset=None, how="any", label="Remove missing rows")
+frame.fill_missing({"units": 0}, label="Fill missing values")
+frame.drop_duplicates(subset=None, keep="first", label="Remove duplicate rows")
+frame.take_rows([2, 0, 2], label="Choose rows")
+frame.astype({"units": "Int64"}, label="Change column types")
+frame.to_numeric(["units", "price"], errors="coerce", label="Parse numeric values")
+frame.to_datetime("date", format="%Y-%m-%d", errors="raise", utc=False)
+frame.string_transform("product", op="strip", label="Normalize text")
+```
+
+- `drop_missing`: `subset=None` means all fields; `how` is `any` or `all`. It keeps
+  native pandas index and dtype behavior while recording retained row positions.
+- `fill_missing`: a nonempty mapping from existing fields to supported, non-missing
+  scalar constants. Pandas dtype compatibility still applies. Filled cells have no
+  raw value input; the constant and filled positions are recorded. The preceding
+  missing cell remains available as context in the input table.
+- `drop_duplicates`: `subset=None` compares all fields. `keep` is `first`, `last`,
+  or the actual boolean `False`. Index labels are not compared.
+- `take_rows`: an ordered sequence of nonnegative positions, allowing repeated rows.
+  Booleans and out-of-range positions are rejected. Native duplicate-label rules apply.
+- `astype`: a nonempty mapping to pandas dtype strings; conversion errors raise.
+- `to_numeric` / `to_datetime`: one field or an ordered list, with `errors` equal to
+  `raise` or `coerce`. Dates require a nonempty format. `utc` is an actual boolean.
+  Coerced missing results still trace to the original input, such as invalid text.
+- `string_transform`: `strip`, `lower`, `upper`, or `casefold`, for string-or-missing
+  fields. Mixed non-string inputs are rejected. An entirely missing field stays missing.
+
+Conversions retain references to the old field. These are recorded operation inputs,
+not an inference of arbitrary Python dependencies. Failed requests do not append a step.
+
+### Vertical combination
+
+```python
+combined = story.concat([january, february], join="outer", ignore_index=True)
+```
+
+Inputs must belong to the same story and the sequence must not be empty. `join` is
+`outer` (union of columns in first-seen order) or `inner` (shared columns in the first
+input's order). At least one output field is required. `ignore_index=False` retains
+native indices; provenance always uses positions. Reusing the same frame retains
+repeated uses. A field absent from an input has no source value reference.
+
+### Long and wide tables
+
+```python
+long = frame.melt(
+    id_vars=["store"], value_vars=["Jan", "Feb"], var_name="month", value_name="sales"
+)
+wide = long.pivot(index="store", columns="month", values="sales")
+```
+
+`melt` requires explicit, disjoint identifier/value fields. An empty `id_vars` list
+is allowed. Output names must be distinct; `value_name` must not already exist.
+The result uses `ignore_index=True`. Value cells point to the original column and
+row. The variable label comes from the column name and has no raw data-cell input.
+
+`pivot` does not aggregate. Duplicate index/column pairs raise a pandas error.
+The index, column-label field, and value field must be distinct. Generated labels
+must be nonempty strings and cannot collide with index names. Multi-field indices
+are supported. Absent combinations have no input cell; an explicitly recorded
+missing value keeps its actual input reference. Numeric pivot labels, multiple
+value fields, and MultiIndex output columns are not supported.
+
+### Named aggregation
+
+```python
+summary = frame.group_agg(
+    by="region",
+    dropna=False,
+    sort=False,
+    min_count=1,
+    aggregations={
+        "revenue_total": ("revenue", "sum"),
+        "average": ("revenue", "mean"),
+        "orders": ("order_id", "count"),
+        "products": ("item", "nunique"),
+    },
+)
+```
+
+Each output name maps to `(input_column, reducer)`; lists of two strings also work.
+Result names are unique and outside the grouping keys; input fields must also be
+outside the keys. Reducers are `sum`, `mean`, `min`, `max`, `median`, `count`, and
+`nunique`. Sum/mean/median require numeric, non-boolean dtypes. Min/max follow pandas
+comparability rules. Count and nunique accept all supported scalar columns.
+`observed=True` is fixed. `min_count` applies to sums and uses the same range/default
+as `group_sum`; missing group keys follow the required `dropna` choice.
+
+Every metric points to its own non-missing input cells. Min/max/median record all
+candidate values, not only the winning value; nunique retains duplicate candidates
+as recorded uses even though it counts distinct values. Group keys retain membership
+references. Constants and values introduced by missing table combinations do not
+invent raw source cells. Arbitrary reducers and aggregation callbacks are unsupported.

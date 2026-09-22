@@ -128,7 +128,7 @@ def test_bad_requests_do_not_append_steps():
         lambda: f.group_sum(by="k", value="k", dropna=False),
         lambda: f.group_sum(by="k", value="v", dropna="false"),
         lambda: f.group_sum(by="k", value="v", dropna=False, min_count=-1),
-        lambda: f.merge(f, on="k", how="outer"),
+        lambda: f.merge(f, on="k", how="cross"),
         lambda: f.merge(f, on=["absent"]),
     ]:
         with pytest.raises(ValueError):

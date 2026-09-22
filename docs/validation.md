@@ -1,9 +1,12 @@
-# Validation scope for 0.1.0
+# Validation scope for 1.0.0rc1
 
-Local checks were performed on macOS on 2026-09-20 and 2026-09-21. All **145 Python tests** passed
-in each environment below. The suite configures up to 320 generated examples across four
-property tests, plus full DataFrame comparisons and independent source-membership
-checks.
+This is an unpublished local candidate checked on macOS on 2026-09-22. It is not a
+claim of universal pandas coverage, cross-browser certification, or demonstrated
+teaching effectiveness. [The 1.0 guide](v1.md) defines the intended surface.
+
+## Python and pandas
+
+The complete **196-test Python suite** passed in all five local environments:
 
 | Python | pandas | NumPy |
 |---|---|---|
@@ -13,146 +16,65 @@ checks.
 | 3.13.14 | 3.0.6 | 2.5.3 |
 | 3.14.6 | 3.0.6 | 2.5.3 |
 
-The covered behaviors include:
+The existing precision, snapshot isolation, callback mutation, budget, atomic-file,
+compression, and lineage tests remain. New cases compare cleaning, conversions,
+concatenation, reshaping, extended joins, named reductions, and quality profiles
+against pandas and independent positional input expectations.
 
-- Filter, join, sum, mean, and non-missing count results against ordinary pandas, including dtypes and column metadata.
-- Source-cell identities with duplicate indices and repeated values.
-- Missing join keys, unmatched rows, duplicate right keys, empty results, and nullable sums.
-- Multiple grouping keys and categorical columns, with both sorting and missing-key policies.
-- Repeated use of an aggregate, retaining repeated source inputs.
-- Large-integer precision in mixed numeric rows and browser serialization.
-- Native float16/float32 and nullable float text through filters, joins, and sums.
-- Source limits with empty aggregate branches, a million reuses of computed zero,
-  and repeated real inputs that must still count against the limit.
-- Source-copy isolation, failed-operation atomicity, and capture limits.
-- Detached axis/category buffers, exact predicate-mutation checks, and unambiguous masks.
-- NumPy durations, missing-value variants, Unicode validation, and UTF-8 byte limits.
-- Signed zero, Decimal representation, datetime fold, and sub-nanosecond datetime precision.
-- Validated live settings, stable step identities, and traversal after changing capture caps.
-- Presentation annotations that do not change data or provenance.
-- Script-boundary escaping, self-contained assets, notebook iframe markup, and file replacement guards.
+Two new property tests each exercise up to 80 generated cases for named metrics
+and melt/pivot round trips. Boundaries include empty and all-missing tables,
+duplicate indices, right-only join rows, missing schema fields, repeated frames,
+nullable types, UTC conversion, reserved/prototype-like field names, rejected
+arguments, and expansion beyond capture limits. The reserved-name regression
+confirmed that a metric named `func` must not become a pandas method argument.
 
-All **98 JavaScript tests** passed with Node.js 25.9.0. Model tests cover scene
-construction, source resolution, multiplicity, malformed references, limits,
-annotation timing, and distinct labels for missing values and duplicate names.
-DOM tests use jsdom and a controlled clock to exercise the actual player controls:
-play/pause/resume, remaining hold time, speed changes, animation pausing, focus,
-origin pagination, and complete right-input inspection. They do not measure browser
-layout. Additional cases cover selection clearing, calculation explanations,
-record/result consistency, safe counts, and Unicode character limits. The cross-language
-check compares 559 selected cells and a page near the end of 10^18 logical source
-uses between Python and JavaScript, including arithmetic, sorting, column selection,
-renaming, native floats, empty branches, and repeated reuse.
-Additional DOM cases cover moving focus to origins, returning to the selected scene
-with its row expansion and remaining hold, restoring right-input inspection, keeping
-the reader's motion setting, and distinguishing blank strings without changing values.
+## Browser model and controls
 
-The generated sales story was also opened in the Codex in-app Chromium browser.
-Its computed totals, source-cell inspection, play/pause, backward navigation, and
-annotation timing were checked interactively. Additional synthetic stories checked
-empty results, the 12-row preview and show-all controls, and HTML-like strings being
-displayed as literal text. A 390-pixel viewport kept the page within its width while
-the table scrolled internally. The reduced-motion control and both light and dark
-themes were inspected. This is a focused functional check, not a cross-browser
-certification or accessibility audit.
+The JavaScript suite uses Node.js 25.9.0, jsdom, synthetic geometry, and a controlled
+clock. It checks the actual player controls, legacy stories, all four reader views,
+search, column visibility, comparison selection, origin return, table catalogs,
+Japanese labels, signed/unsafe chart values, group identity, malformed metadata,
+and recorded movement for joins, named metrics, melt, pivot, and arithmetic.
+Synthetic rectangles test correspondence; they do not measure browser CSS layout.
 
-The follow-up inspection also reached the 60th source input through pagination,
-opened all 15 rows of a filtered right-hand input, confirmed focus on a requested
-source cell, distinguished a missing key from the literal string `∅`, and checked
-long labels in a 390-pixel light-themed viewport.
+The Python/JavaScript wire check compares **803 cells** and a page near the end of
+10^18 logical repeated source uses. This is a small repeated-reference graph, not
+10^18 physical rows. The checks include the new operations, schema gaps, reserved
+metric names, and repeated inputs. No tests are skipped to accommodate a result.
 
-The precision example was checked with float32 and float64 keys:
-both displayed `0.1`, their selected column dtypes remained distinct, and the unmatched
-join cell explained the missing match. At an actual 390-pixel viewport the dtype and
-origins remained readable without page overflow. A story reusing computed zero a
-million times displayed zero raw origins without a traversal error or leftover rows.
+## Interactive checks
 
-The navigation follow-up verified that selecting a cell reveals its origins and
-moves focus there. Visiting source row 60 and returning restored the sum cell and
-the second origin page. The same focus/return controls worked inside the sandboxed
-iframe generated by the notebook representation. Empty, space-only, and tab-only
-strings were distinguishable from missing values; consecutive spaces remained
-visible. At 390 pixels, the added controls wrapped without page overflow. Tab and
-Enter returned from the origins section to the selected cell. These focused checks
-do not establish compatibility with every screen reader or notebook frontend.
+The retail and reshape examples independently compute expected DataFrames with
+pandas and assert full equality. Retail produces Books revenue 2700; reshape
+produces North growth 70 from 150 + 220 − 100 − 200.
 
-A separate deterministic audit checked source-row membership across 480 combinations
-of two grouping keys, categorical/ordered settings, missing-key handling, sorting,
-and input sizes on each supported pandas line (960 cases total); no mismatch was found.
+The in-app Chromium browser is used to inspect the real player, including Japanese
+chapter navigation, comparison, quality, chart selection, raw input inspection,
+search, visible fields, and returning to the chosen view. At 390×844, the retail
+page stayed within 390 pixels; searching `bad` after choosing the quantity column
+showed two of five input rows. Selecting Books revenue 2700 from its chart reached
+raw values 1, 900, 2, 900 and restored focus to the bar on return.
 
-JupyterLab 4.6.3 / nbclient 0.11.0 / Python 3.13.14 were also exercised. The shipped
-notebook ran in an isolated kernel, displayed the empty-story hint and player iframe,
-and passed its result assertions. In the actual JupyterLab frontend, the sum 27
-resolved to inputs 12 and 15; source inspection and selection clearing worked.
-This verifies that frontend/environment combination, not every notebook host.
+The notebook check executes the shipped notebook in an isolated kernel, inspects
+its rich-output markup, and shuts the kernel down. The sandboxed player can also be
+checked separately in a browser. A kernel check alone does not verify every notebook
+frontend or screen reader.
 
-The distribution check audits wheel/sdist contents and installs a wheel in a new
-virtual environment outside the checkout. It runs the README example with runtime
-connections blocked, followed by a 1,000-row analysis with calculation, grouping,
-sorting, column selection, renaming, paging, and compressed export. This check is included in the release workflow, alongside
-building the wheel from the sdist and validating package metadata.
+## Distribution and scope
 
-The repository includes a GitHub Actions matrix for Linux, macOS, Windows, and
-multiple Python versions. That remote matrix has **not** been run as part of this
-local preparation. Other platforms and browser versions remain unverified here.
+Release checks build the wheel from the sdist, check both package metadata files,
+compare archive contents with the source, and install outside the checkout in a new
+virtual environment. The installed smoke test blocks runtime socket connections
+and exercises the README example, a 1,000-row analysis, and cleaning through named
+aggregation, melt, and pivot. The player assets and player-only MIT notice must be
+present in the installed package and HTML output.
 
-Tests passing does not establish teaching effectiveness, production suitability for
-unbounded datasets, or equivalence for unsupported pandas operations. The package's
-documented operation and data limits are part of its supported scope.
+The repository configures Linux/macOS/Windows CI. That remote matrix has **not**
+been run while publication is on hold. Actual GUI checks here cover Chromium;
+Safari, Firefox, and accessibility certification remain outside the evidence.
+The implementation retains snapshots in memory and has finite capture/display
+limits; these checks do not establish suitability for arbitrary or unbounded data.
 
-## Larger analysis verification
-
-The synthetic 50,000-order analysis matches a separate pandas pipeline and produces
-eight regional totals. The first total is 2,545,430 with 10,946 raw operand uses.
-In Chromium, the main table rendered 100 rows while browsing the complete input;
-row 50,000 was reached directly. The last input behind the first total resolved to
-source row 49,998, `unit_price=90`, and returning restored the final report and its
-origin page. These are checks of this particular synthetic dataset.
-
-Compression tests decode the full JSON, check reproducible output, reject unsupported
-options, and enforce the JSON budget before compression. DOM tests cover local gzip
-decoding, literal HTML-like strings, unsupported decompression, mismatched byte counts,
-payload-text release, grouped row jumps, number-field retention, and scrolling state.
-The renderer avoids constructing a much larger HTML-escaped copy for gzip output.
-
-Local performance comparisons used the same Python 3.13.14 / pandas 3.0.6, synthetic
-50,000-row source/filter/group pipeline, and two fresh processes per case. The values
-below are medians; RSS is each process's high-water mark, not incremental allocation.
-The baseline is commit `b7506ac`. Groups are requested before filtering.
-
-| Requested groups | Peak RSS before → after | Group recording before → after |
-|---|---|---|
-| 100 | 697.7 MB → 207.0 MB | 0.232 s → 0.077 s |
-| 50,000 | 865.8 MB → 309.5 MB | 0.885 s → 0.258 s |
-
-The 100-group JSON encoding time remained about 2.6 seconds; this change does not
-claim every stage became faster. Results vary with data, platform, and machine load.
-See [analysis and scale](analysis.md) for capture budgets and the in-memory boundary.
-
-## Value movement and aggregate follow-up
-
-Mean/count tests compare results and dtypes with pandas, including missing values,
-multiple keys, repeated provenance, empty branches, nullable and categorical inputs,
-duplicate indices, invalid requests, and paged origins. Count means non-missing
-entries, not row count. The Python/JavaScript comparison includes both operations.
-
-Motion tests use distinct synthetic cell rectangles and a controlled clock. They
-check measured source/destination offsets, a status line changing layout, compact
-numeric tokens, null-key matches, matched missing values versus non-matches,
-repeated right inputs, the 48-token cap, offscreen inputs, zero-input groups,
-pause/resume at the last scene, speed, reduced motion, view changes, and cleanup.
-The tests assert that only contributing aggregate values move. Two earlier row-ghost
-tests were updated to this value-level contract with explicit source/target checks;
-their exclusion checks were retained. Chapter jumps now stay static, so the existing
-inspection-cleanup test first visits the grouping scene to create a real transition.
-
-The Japanese showcase was inspected in Chromium at the default desktop viewport
-and at 390×844. The join used repeated Books/Home inputs from labeled cards; the
-aggregate used 120 and 80 for Books=200 and did not animate the missing sale. The
-number of moving inputs reflected the fully visible subset. Paused rectangles
-remained unchanged across observations. At 390 pixels the document stayed within
-its width; keyboard replay retained a scroll position of 295.5 pixels and animated
-all five visible join inputs. Automated locator clicks may scroll a control into
-view before activating it; keyboard replay was used to distinguish that behavior
-from the player's scroll handling. These checks do not establish Safari/Firefox
-compatibility or accessibility certification.
+Earlier 0.1 measurements and frontend checks are retained in
+[the historical validation record](validation-0.1.md). In particular, its memory
+and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc1.

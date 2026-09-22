@@ -3,8 +3,10 @@
   "use strict";
   const root = document.getElementById("framechoreo-player");
   const dataNode = document.getElementById("framechoreo-data");
+  let language = document.documentElement.lang === "ja" ? "ja" : "en";
+  const tx = (en, ja) => (language === "ja" ? ja : en);
   if (dataNode.dataset.encoding === "gzip-base64" && preparedData === undefined) {
-    root.textContent = "Opening story…";
+    root.textContent = tx("Opening story…", "ストーリーを開いています…");
     root.setAttribute("aria-busy", "true");
     (async () => {
       if (typeof DecompressionStream !== "function")
@@ -38,7 +40,8 @@
       startPlayer(data);
     })().catch((error) => {
       root.removeAttribute("aria-busy");
-      root.textContent = "Could not open this story: " + error.message;
+      root.textContent =
+        tx("Could not open this story: ", "ストーリーを開けませんでした: ") + error.message;
       root.dataset.ready = "error";
     });
     return;
@@ -55,26 +58,59 @@
     b.addEventListener("click", action);
     return b;
   };
-  const count = (number, noun) => number + " " + noun + (number === 1 ? "" : "s");
+  const count = (number, noun) =>
+    language === "ja"
+      ? number +
+        ({
+          row: "行",
+          column: "列",
+          "input row": "入力行",
+          "output row": "出力行",
+          character: "文字",
+        }[noun] || noun)
+      : number + " " + noun + (number === 1 ? "" : "s");
   const blankKind = (cell) =>
     cell.type === "string" && !cell.display.trim()
       ? cell.display.length
         ? "whitespace"
         : "empty"
       : null;
-  const displayValue = (cell) => (blankKind(cell) ? JSON.stringify(cell.display) : cell.display);
+  const displayValue = (cell) =>
+    cell.type === "string" &&
+    (blankKind(cell) ||
+      cell.display !== cell.display.trim() ||
+      /[\r\n\t\u2028\u2029]/.test(cell.display))
+      ? JSON.stringify(cell.display)
+          .replace(/\u2028/g, "\\u2028")
+          .replace(/\u2029/g, "\\u2029")
+      : cell.display;
   const typeDescription = (cell) =>
     blankKind(cell) === "empty"
-      ? "empty string"
+      ? tx("empty string", "空文字")
       : blankKind(cell) === "whitespace"
-        ? "whitespace-only string (" + count([...cell.display].length, "character") + ")"
-        : cell.type;
+        ? tx("whitespace-only string (", "空白だけの文字列（") +
+          count([...cell.display].length, "character") +
+          ")"
+        : language === "ja"
+          ? {
+              string: "文字列",
+              integer: "整数",
+              float: "浮動小数点数",
+              decimal: "小数 (Decimal)",
+              boolean: "真偽値",
+              missing: "欠損",
+              datetime: "日付・時刻",
+              duration: "期間",
+            }[cell.type] || cell.type
+          : cell.type;
   try {
     const data = preparedData === undefined ? JSON.parse(dataNode.textContent) : preparedData;
     dataNode.textContent = "";
     const model = globalThis.FrameChoreoModel,
       steps = model.indexStory(data),
       scenes = model.scenes(data, steps);
+    language = data.language || "en";
+    document.documentElement.lang = language;
     const reduced = matchMedia("(prefers-reduced-motion: reduce)");
     const state = {
       index: 0,
@@ -87,6 +123,7 @@
       inspection: null,
       returnAll: false,
       returnPage: 0,
+      returnView: null,
       originOffset: 0n,
       reduceMotion: false,
     };
@@ -111,14 +148,14 @@
     root.append(brand, title);
     const toolbar = el("div", "toolbar");
     const play = button(
-      "▶ Play",
+      tx("▶ Play", "▶ 再生"),
       () =>
         state.playing || rowAnimations.some((a) => a.playState === "running") ? stop() : start(),
       "button primary",
     );
-    const prev = button("← Previous", () => go(state.index - 1));
-    const next = button("Next →", () => go(state.index + 1));
-    const speed = el("label", "speed", "Speed "),
+    const prev = button(tx("← Previous", "← 前へ"), () => go(state.index - 1));
+    const next = button(tx("Next →", "次へ →"), () => go(state.index + 1));
+    const speed = el("label", "speed", tx("Speed ", "速度 ")),
       speedSelect = el("select");
     for (const value of [0.5, 1, 2]) {
       const option = el("option", "", value + "×");
@@ -145,12 +182,13 @@
       lastKey = null;
       render();
     });
-    motionLabel.append(motionCheckbox, el("span", "", "Reduce motion"));
+    motionLabel.append(motionCheckbox, el("span", "", tx("Reduce motion", "動きを減らす")));
     toolbar.append(play, prev, next, el("span", "spacer"), motionLabel, speed);
     root.append(toolbar);
     const nav = el("nav", "timeline");
-    nav.setAttribute("aria-label", "Transformation steps");
+    nav.setAttribute("aria-label", tx("Transformation steps", "分析の工程"));
     root.append(nav);
+    let currentChapter = null;
     const chapterButtons = scenes.map((scene, i) => {
       const names = {
         source: "Input",
@@ -164,8 +202,69 @@
         select: "Columns",
         rename: "Rename",
         calculate: "Calculate",
+        drop_missing: "Drop missing",
+        fill_missing: "Fill missing",
+        drop_duplicates: "Deduplicate",
+        take: "Take",
+        astype: "Types",
+        to_numeric: "Numbers",
+        to_datetime: "Dates",
+        string_transform: "Text",
+        concat: "Combine",
+        melt: "Melt",
+        pivot: "Pivot",
+        aggregate: "Summarize",
       };
+      const japanese = {
+        source: "入力",
+        filter: "抽出",
+        merge: "結合",
+        group: "グループ",
+        sum: "合計",
+        mean: "平均",
+        count: "件数",
+        sort: "並べ替え",
+        select: "列を選ぶ",
+        rename: "名前を変える",
+        calculate: "計算",
+        drop_missing: "欠損行を除く",
+        fill_missing: "欠損を補う",
+        drop_duplicates: "重複を除く",
+        take: "行を選ぶ",
+        astype: "型を変える",
+        to_numeric: "数値に変換",
+        to_datetime: "日付に変換",
+        string_transform: "文字を整える",
+        concat: "縦につなぐ",
+        melt: "縦長にする",
+        pivot: "横長にする",
+        aggregate: "複数指標の集計",
+      };
+      if (language === "ja") Object.assign(names, japanese);
+      const chapter = scene.step.presentation?.chapter;
+      if (chapter && chapter !== currentChapter) {
+        currentChapter = chapter;
+        nav.append(el("div", "chapter-label", chapter));
+      }
       const b = button(i + 1 + " · " + (names[scene.kind] || scene.kind), () => go(i), "chapter");
+      b.dataset.operation = scene.step.operation;
+      b.dataset.kind = scene.kind;
+      b.dataset.scene = String(i);
+      const name =
+        scene.kind === "group"
+          ? tx("Form the groups", "グループを作る")
+          : model.tableLabel(data, scene.step);
+      b.replaceChildren(el("span", "chapter-index", i + 1));
+      const copy = el("span", "chapter-copy");
+      copy.append(
+        el("span", "chapter-name", name),
+        el(
+          "small",
+          "chapter-meta",
+          (names[scene.kind] || scene.kind) + " · " + count(scene.table.rows.length, "row"),
+        ),
+      );
+      b.append(copy);
       nav.append(b);
       return b;
     });
@@ -180,14 +279,18 @@
     caption.tabIndex = -1;
     info.append(operation, caption);
     const meta = el("div", "stage-meta"),
-      replay = button("↻ Replay the movement", replayMotion, "text-button replay-button");
+      replay = button(
+        tx("↻ Replay the movement", "↻ 移動をもう一度見る"),
+        replayMotion,
+        "text-button replay-button",
+      );
     replay.dataset.action = "replay-motion";
     meta.append(counter, replay);
     heading.append(info, meta);
     shell.append(heading);
     const code = el("div", "code"),
       codeDisclosure = el("details", "operation-code");
-    codeDisclosure.append(el("summary", "", "Python operation"), code);
+    codeDisclosure.append(el("summary", "", tx("Python operation", "処理の内容")), code);
     codeDisclosure.addEventListener("toggle", settleAnimations);
     shell.append(codeDisclosure);
     const body = el("div", "stage-body");
@@ -200,11 +303,12 @@
     const motionStatus = el("div", "motion-status");
     body.append(motionStatus);
     const backToStep = button(
-      "← Back to the transformation",
+      tx("← Back to the transformation", "← 加工の表示に戻る"),
       () => {
         state.inspection = null;
         state.all = state.returnAll;
         state.tablePage = state.returnPage;
+        workbench.restore(state.returnView);
         lastKey = null;
         render();
         reveal(caption);
@@ -221,7 +325,7 @@
     dataStage.append(scroll);
     const table = el("div");
     table.setAttribute("role", "table");
-    table.setAttribute("aria-label", "Recorded values");
+    table.setAttribute("aria-label", tx("Recorded values", "記録した値"));
     scroll.append(table);
     const columnHead = el("div", "column-head");
     columnHead.setAttribute("role", "row");
@@ -231,33 +335,49 @@
     const limitInfo = el("div", "row-limit");
     body.append(limitInfo);
     const inspector = el("section", "inspector");
-    inspector.setAttribute("aria-label", "Value origins");
+    inspector.setAttribute("aria-label", tx("Value origins", "値の入力元"));
     inspector.tabIndex = -1;
     root.append(inspector);
-    const inspectorHead = el("div", "inspector-head", "SELECT A VALUE"),
-      selectedValue = el("div", "selected-value", "Select any cell to trace its value inputs.");
+    const inspectorHead = el("div", "inspector-head", tx("SELECT A VALUE", "値を選んでください")),
+      selectedValue = el(
+        "div",
+        "selected-value",
+        tx(
+          "Select any cell to trace its value inputs.",
+          "セルを選ぶと、その値の入力元を確認できます。",
+        ),
+      );
     inspectorHead.id = "framechoreo-selected-cell";
     inspector.setAttribute("aria-describedby", inspectorHead.id);
     const selectedType = el("div", "value-type");
     const columnDtype = el("div", "value-type column-dtype");
     const selectionLegend = el("div", "value-type selection-legend");
+    const lineagePath = el("div", "lineage-path");
+    lineagePath.setAttribute(
+      "aria-label",
+      tx("Steps traversed by these value inputs", "値の入力元をたどった工程"),
+    );
     const origins = el("div", "origins"),
       originPager = el("div", "origin-pager"),
       explanation = el("div", "explanation");
     const clearSelection = button(
-      "Clear selection",
+      tx("Clear selection", "選択を解除"),
       () => {
         settleAnimations();
         const target = board.querySelector(".cell.selected") || caption;
         state.selection = null;
         state.selectionLocation = null;
         state.originOffset = 0n;
-        inspectorHead.textContent = "SELECT A VALUE";
-        selectedValue.textContent = "Select any cell to trace its value inputs.";
+        inspectorHead.textContent = tx("SELECT A VALUE", "値を選んでください");
+        selectedValue.textContent = tx(
+          "Select any cell to trace its value inputs.",
+          "セルを選ぶと、その値の入力元を確認できます。",
+        );
         selectedType.textContent = "";
         columnDtype.textContent = "";
         selectionLegend.textContent = "";
         origins.replaceChildren();
+        lineagePath.replaceChildren();
         originPager.replaceChildren();
         explanation.textContent = "";
         explanation.classList.remove("calculation-note");
@@ -270,7 +390,11 @@
     );
     clearSelection.dataset.action = "clear-selection";
     clearSelection.hidden = true;
-    const returnSelection = button("Back to selected cell", returnToSelection, "text-button");
+    const returnSelection = button(
+      tx("Back to selected cell", "選んだセルに戻る"),
+      returnToSelection,
+      "text-button",
+    );
     returnSelection.dataset.action = "return-selection";
     returnSelection.hidden = true;
     const inspectorTitle = el("div", "inspector-titlebar"),
@@ -283,24 +407,27 @@
       selectedType,
       columnDtype,
       selectionLegend,
+      lineagePath,
       origins,
       originPager,
       explanation,
     );
     const disclosure = el("details", "disclosure");
     disclosure.append(
-      el("summary", "", "About the data in this file"),
+      el("summary", "", tx("About the data in this file", "このファイルに含まれるデータ")),
       el(
         "p",
         "",
-        "This file includes all recorded ancestor tables, including filtered-out rows and removed columns. Compression and display limits do not remove data. Review source tables before sharing. Playback uses recorded results and makes no network requests.",
+        tx(
+          "This file includes all recorded ancestor tables, including filtered-out rows and removed columns. Compression and display limits do not remove data. Review source tables before sharing. Playback uses recorded results and makes no network requests.",
+          "このファイルには、除外した行や表示から外した列も含め、入力元の表が記録されています。圧縮・検索・表示列の変更でデータは削除されません。共有前に元の表を確認してください。再生は記録済みの結果を使い、外部通信を行いません。",
+        ),
       ),
     );
-    root.append(
-      disclosure,
+    disclosure.append(
       el(
-        "div",
-        "footer",
+        "p",
+        "small",
         "FrameChoreo " +
           data.library_version +
           " · pandas " +
@@ -309,15 +436,45 @@
           data.schema_version,
       ),
     );
+    root.append(disclosure, el("div", "footer", "FrameChoreo " + data.library_version));
     const motionLayer = el("div", "motion-layer");
     motionLayer.setAttribute("aria-hidden", "true");
     root.append(motionLayer);
+    const workbench = globalThis.FrameChoreoWorkbench.create({
+      root,
+      data,
+      steps,
+      scenes,
+      brand,
+      title,
+      nav,
+      toolbar,
+      shell,
+      body,
+      dataStage,
+      limitInfo,
+      inspector,
+      disclosure,
+      el,
+      button,
+      cellButton,
+      displayValue,
+      tx,
+      inspect: (id) => inspectStep(id),
+      settle: settleAnimations,
+      change: (resetPage) => {
+        stop();
+        if (resetPage) state.tablePage = 0;
+        lastKey = null;
+        render();
+      },
+    });
 
     function syncPlayButton() {
       play.textContent =
         state.playing || rowAnimations.some((a) => a.playState === "running")
-          ? "Ⅱ Pause"
-          : "▶ Play";
+          ? tx("Ⅱ Pause", "Ⅱ 一時停止")
+          : tx("▶ Play", "▶ 再生");
     }
     function animate(node, frames, options, finish = () => {}) {
       const animation = node.animate(frames, options);
@@ -339,7 +496,7 @@
       state.playing = false;
       clearTimeout(timer);
       timer = null;
-      play.textContent = "▶ Play";
+      play.textContent = tx("▶ Play", "▶ 再生");
       rowAnimations.forEach((animation) => {
         if (animation.playState === "running") animation.pause();
       });
@@ -374,6 +531,7 @@
         state.inspection = null;
         state.all = state.returnAll;
         state.tablePage = state.returnPage;
+        workbench.restore(state.returnView);
         lastKey = null;
         render();
       }
@@ -384,7 +542,7 @@
       )
         go(0, true);
       state.playing = true;
-      play.textContent = "Ⅱ Pause";
+      play.textContent = tx("Ⅱ Pause", "Ⅱ 一時停止");
       rowAnimations.forEach((animation) => {
         if (animation.playState === "paused") animation.play();
       });
@@ -438,27 +596,42 @@
         returnAll: state.returnAll,
         returnPage: state.returnPage,
         remainingHold,
+        view: workbench.capture(),
+        returnView: state.returnView,
       };
       state.originOffset = 0n;
       inspectorHead.textContent =
         model.tableLabel(data, tableData) + " · row " + (row + 1) + " · " + column;
       selectedValue.textContent = displayValue(cell);
-      selectedType.textContent = "Type: " + typeDescription(cell);
+      selectedType.textContent = tx("Type: ", "値の種類: ") + typeDescription(cell);
       columnDtype.textContent = dtypeLabel(step, column);
       clearSelection.hidden = false;
       returnSelection.hidden = false;
       explanation.classList.remove("calculation-note");
       origins.replaceChildren();
+      lineagePath.replaceChildren();
       originPager.replaceChildren();
       try {
         const trace = model.prepareTrace(data, { step, row, column }, steps);
         state.selection = { step, row, column, trace };
         renderOrigins();
-        const details = model.cellExplanation(steps, { step, row, column });
+        for (const id of trace.steps || []) {
+          const node = steps.get(id);
+          const chip = button(model.tableLabel(data, node), () => inspectStep(id), "lineage-step");
+          chip.title = node.operation;
+          lineagePath.append(chip);
+        }
+        const details = model.cellExplanation(steps, { step, row, column }, language);
         const instructions =
           trace.total > 0n
-            ? "Select an input above to inspect its source table. Repeated inputs are retained."
-            : "No raw source value inputs were recorded for this cell.";
+            ? tx(
+                "Select an input above to inspect its source table. Repeated inputs are retained.",
+                "入力を選ぶと元の表へ移動できます。同じ入力を複数回使った場合も、その回数を残しています。",
+              )
+            : tx(
+                "No raw source value inputs were recorded for this cell.",
+                "このセルには元データの値が記録されていません。定数や空の入力からできた値は、処理の説明を確認してください。",
+              );
         explanation.textContent = details.text ? details.text + " " + instructions : instructions;
         explanation.classList.toggle("calculation-note", Boolean(details.warning));
       } catch (error) {
@@ -483,7 +656,7 @@
     function revealCell(target) {
       const input = limitInfo.querySelector('[data-action="row-number"]');
       if (input) input.value = String(target.row + 1);
-      reveal(findBoardCell(target) || caption);
+      reveal(workbench.findCell(target) || findBoardCell(target) || caption);
     }
     function returnToSelection() {
       const target = state.selectionLocation;
@@ -496,6 +669,17 @@
       state.returnAll = target.returnAll;
       state.returnPage = target.returnPage;
       remainingHold = target.remainingHold;
+      state.returnView = target.returnView;
+      workbench.restore(target.view);
+      if (target.view?.mode === "compare") {
+        lastKey = null;
+        render();
+        const cell = workbench.findCell(target);
+        if (cell) {
+          reveal(cell);
+          return;
+        }
+      }
       if (activeScene().table.id !== target.step) {
         inspectStep(target.step, target);
         return;
@@ -509,7 +693,9 @@
       if (!state.inspection) {
         state.returnAll = state.all;
         state.returnPage = state.tablePage;
+        state.returnView = workbench.capture();
       }
+      workbench.inspect();
       state.inspection = step;
       state.all = all || (target !== null && target.row >= 12);
       state.tablePage = target ? Math.floor(target.row / 100) : 0;
@@ -530,7 +716,7 @@
         const b = button("", () => inspectStep(origin.step, origin), "origin"),
           value = el("span", "value", displayValue(origin.cell));
         if (blankKind(origin.cell)) value.dataset.blank = blankKind(origin.cell);
-        b.title = "Type: " + typeDescription(origin.cell);
+        b.title = tx("Type: ", "値の種類: ") + typeDescription(origin.cell);
         b.append(
           el(
             "span",
@@ -554,11 +740,15 @@
         (control.disabled ? origins.firstElementChild : control).focus();
       };
       const previous = button(
-          "← Previous inputs",
+          tx("← Previous inputs", "← 前の入力"),
           () => change(-50n, "origins-previous"),
           "text-button",
         ),
-        next = button("Next inputs →", () => change(50n, "origins-next"), "text-button");
+        next = button(
+          tx("Next inputs →", "次の入力 →"),
+          () => change(50n, "origins-next"),
+          "text-button",
+        );
       previous.dataset.action = "origins-previous";
       next.dataset.action = "origins-next";
       previous.disabled = offset === 0n;
@@ -566,13 +756,15 @@
       const status = el(
         "span",
         "",
-        offset + 1n + "–" + (offset + BigInt(inputs.length)) + " of " + total + " value inputs",
+        language === "ja"
+          ? offset + 1n + "–" + (offset + BigInt(inputs.length)) + " / " + total + " 個の入力"
+          : offset + 1n + "–" + (offset + BigInt(inputs.length)) + " of " + total + " value inputs",
       );
       status.setAttribute("aria-live", "polite");
       originPager.append(previous, status, next);
       if (total > 200n) {
         const form = el("form", "jump-form"),
-          label = el("label", "", "Input number "),
+          label = el("label", "", tx("Input number ", "入力の番号 ")),
           number = el("input"),
           message = el("span", "jump-message");
         number.type = "text";
@@ -583,14 +775,15 @@
         label.append(number);
         message.setAttribute("role", "status");
         const jump = button(
-          "Go to input",
+          tx("Go to input", "入力へ移動"),
           () => {
             if (
               !/^[1-9][0-9]*$/.test(number.value) ||
               number.value.length > 100 ||
               BigInt(number.value) > total
             ) {
-              message.textContent = "Enter an input number from 1 to " + total + ".";
+              message.textContent =
+                tx("Enter an input number from 1 to ", "入力の番号を1〜") + total + ".";
               return;
             }
             const position = BigInt(number.value) - 1n;
@@ -620,14 +813,18 @@
           column = b.dataset.column,
           isRoot = isRootSelection(step, row, column),
           isSource = isTracedSource(step, row, column);
-        if (isSource) sourceVisible = true;
+        if (isSource && !b.closest("[hidden]") && !b.closest("details:not([open])"))
+          sourceVisible = true;
         b.classList.toggle("selected", isRoot);
         b.classList.toggle("selected-source", isSource);
         b.setAttribute("aria-pressed", String(isRoot || isSource));
       });
       selectionLegend.textContent =
         state.selection && sourceVisible
-          ? "Solid outline: the selected value. Dashed outlines: traced source values currently in view."
+          ? tx(
+              "Solid outline: the selected value. Dashed outlines: traced source values currently in view.",
+              "実線は選択した値、破線はこの表示にある入力元の値です。",
+            )
           : "";
     }
     function cellButton(step, row, column, cell, originNote) {
@@ -640,7 +837,7 @@
       const dtype = dtypeLabel(step, column);
       b.title =
         displayValue(cell) +
-        "\nType: " +
+        tx("\nType: ", "\n値の種類: ") +
         typeDescription(cell) +
         (dtype ? "\n" + dtype : "") +
         (originNote ? "\n" + originNote : "");
@@ -650,19 +847,19 @@
           ": " +
           displayValue(cell) +
           (cell.type === "missing"
-            ? " (missing)"
+            ? tx(" (missing)", "（欠損）")
             : blankKind(cell)
               ? " (" + typeDescription(cell) + ")"
               : "") +
           (originNote ? "; " + originNote : "") +
-          "; trace value inputs",
+          tx("; trace value inputs", "：入力元を確認"),
       );
       return b;
     }
     function dtypeLabel(step, column) {
       const tableData = steps.get(step),
         dtype = tableData.dtypes?.[tableData.columns.indexOf(column)];
-      return typeof dtype === "string" ? "Column dtype: " + dtype : "";
+      return typeof dtype === "string" ? tx("Column dtype: ", "列の型: ") + dtype : "";
     }
     function renderReference(scene, rows) {
       const previous = reference.querySelector("details");
@@ -675,8 +872,11 @@
       const dock = el("section", "source-dock"),
         cards = el("div", "source-cards"),
         seen = new Set();
-      dock.setAttribute("aria-label", "Join value inputs");
-      dock.append(el("div", "source-heading", "From " + model.tableLabel(data, right)), cards);
+      dock.setAttribute("aria-label", tx("Join value inputs", "結合で使う入力値"));
+      dock.append(
+        el("div", "source-heading", tx("From ", "入力元: ") + model.tableLabel(data, right)),
+        cards,
+      );
       for (const row of rows)
         for (const refs of Object.values(row.cell_parents))
           for (const ref of refs) {
@@ -692,9 +892,24 @@
             cards.append(card);
           }
       if (!seen.size)
-        cards.append(el("span", "muted small", "No right-hand value inputs for these rows."));
+        cards.append(
+          el(
+            "span",
+            "muted small",
+            tx(
+              "No right-hand value inputs for these rows.",
+              "この表示範囲には、結合する側の入力値がありません。",
+            ),
+          ),
+        );
       if (seen.size === 12)
-        dock.append(el("div", "source-footnote", "Preview limited to 12 source cells"));
+        dock.append(
+          el(
+            "div",
+            "source-footnote",
+            tx("Preview limited to 12 source cells", "入力元は最大12セルを表示しています"),
+          ),
+        );
       reference.append(dock);
       const details = el("details", "reference");
       details.dataset.step = scene.step.id;
@@ -708,14 +923,18 @@
         el(
           "summary",
           "",
-          "Right input: " + model.tableLabel(data, right) + " · " + right.rows.length + " rows",
+          tx("Right input: ", "結合する表: ") +
+            model.tableLabel(data, right) +
+            " · " +
+            right.rows.length +
+            " rows",
         ),
       );
       const area = el("div", "ref-table"),
         t = el("table"),
         head = el("thead"),
         tr = el("tr");
-      tr.append(el("th", "", "Row"));
+      tr.append(el("th", "", tx("Row", "行")));
       for (const col of right.columns) tr.append(el("th", "", col));
       head.append(tr);
       t.append(head);
@@ -756,7 +975,7 @@
         );
       details.append(area);
       const inspect = button(
-        "Inspect all " + right.rows.length + " rows",
+        tx("Inspect all ", "表の全行を見る: ") + right.rows.length + " rows",
         () => inspectStep(right.id, null, true),
         "text-button inspect-input",
       );
@@ -773,12 +992,15 @@
     }
     function renderLegend(scene) {
       legend.replaceChildren();
-      if (scene.kind === "filter")
+      if (["filter", "drop_missing", "drop_duplicates"].includes(scene.kind))
         legend.append(
           legendItem(
             "data-kind",
             "filter",
-            "Fading rows were removed by the filter; earlier steps still have them.",
+            tx(
+              "Fading rows were removed by the filter; earlier steps still have them.",
+              "除外する行は表示から離れます。元の表には記録を残しています。",
+            ),
           ),
         );
       else if (scene.kind === "merge")
@@ -786,17 +1008,26 @@
           legendItem(
             "data-kind",
             "merge",
-            "Blue cards → matching result cells. Select a value to inspect its source.",
+            tx(
+              "Blue cards → matching result cells. Select a value to inspect its source.",
+              "青いカードから、対応する結果のセルへ値が移動します。値を選ぶと入力元を確認できます。",
+            ),
           ),
         );
-      else if (["group", "sum", "mean", "count"].includes(scene.kind)) {
+      else if (["group", "sum", "mean", "count", "aggregate"].includes(scene.kind)) {
         legend.append(
           legendItem(
             "data-kind",
             "group",
             scene.kind === "group"
-              ? "Rows with the same key share a group number and color. Colors repeat; group labels stay distinct."
-              : "Only non-missing inputs move into their group's result. Select a result for all inputs.",
+              ? tx(
+                  "Rows with the same key share a group number and color. Colors repeat; group labels stay distinct.",
+                  "同じキーの行に、共通のグループ番号と色を付けています。色が繰り返されても、番号とラベルで区別できます。",
+                )
+              : tx(
+                  "Only non-missing inputs move into their group's result. Select a result for all inputs.",
+                  "欠損を除いた入力が、同じグループの結果へ集まります。すべての入力は結果のセルから確認できます。",
+                ),
           ),
         );
         if (scene.step.parameters.dropna)
@@ -804,13 +1035,24 @@
             legendItem(
               "data-kind",
               "filter",
-              "Rows with a missing grouping key are excluded from the result.",
+              tx(
+                "Rows with a missing grouping key are excluded from the result.",
+                "グループのキーが欠損している行は結果に含めません。",
+              ),
             ),
           );
       }
     }
     function replayMotion() {
-      if (replaying || state.inspection || state.index === 0 || state.all) return;
+      if (
+        replaying ||
+        state.inspection ||
+        state.index === 0 ||
+        state.all ||
+        workbench.mode !== "table" ||
+        workbench.query
+      )
+        return;
       if (state.reduceMotion || reduced.matches) return;
       stop();
       replaying = true;
@@ -846,41 +1088,48 @@
         groupMapCache.set(scene.step.id, groupMap);
       }
       for (const row of rows) {
+        const identity = model.groupIdentity(steps, scene.table.id, row.position);
         const group =
           scene.kind === "group"
             ? groupMap.has(row.position)
               ? groupMap.get(row.position)
               : -1
-            : ["sum", "mean", "count"].includes(scene.kind)
-              ? row.position
-              : null;
+            : (identity?.row ?? null);
         if (scene.kind === "group" && group !== lastGroup) {
           result.push({
             band: true,
             y,
             label:
               group < 0
-                ? "Excluded missing-key rows"
+                ? tx("Excluded missing-key rows", "キーが欠損しているため除外する行")
                 : "G" + (group + 1) + " · " + model.groupTitle(scene, group),
             group,
           });
           y += 36;
           lastGroup = group;
         }
-        result.push({ row, y, group });
+        result.push({ row, y, group, groupStep: identity?.step });
         positions.set(model.rowKey(scene.table.id, row.position), y);
         y += 46;
       }
       return { items: result, positions, height: Math.max(70, y) };
     }
     function visibleCell(node) {
-      if (!node || !node.isConnected || node.closest("details:not([open])")) return false;
+      if (
+        !node ||
+        !node.isConnected ||
+        node.closest("details:not([open])") ||
+        node.closest("[hidden]")
+      )
+        return false;
       const r = node.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return false;
       let left = 0,
         top = 0,
         right = window.innerWidth,
         bottom = window.innerHeight;
+      if (window.getComputedStyle(toolbar).position === "sticky")
+        top = Math.max(top, toolbar.getBoundingClientRect().bottom);
       for (let parent = node.parentElement; parent; parent = parent.parentElement) {
         if (
           parent === scroll ||
@@ -897,18 +1146,28 @@
       return r.left >= left && r.right <= right && r.top >= top && r.bottom <= bottom;
     }
     function animateTransition(scene, oldRows, oldCells, rows) {
-      const aggregate = ["sum", "mean", "count"].includes(scene.kind),
+      const aggregate = ["sum", "mean", "count", "aggregate"].includes(scene.kind),
+        transfer = aggregate || ["merge", "melt", "pivot", "calculate"].includes(scene.kind),
         flows = [],
         sources = new Map(),
         targets = new Map();
-      if (aggregate || scene.kind === "merge") {
+      if (transfer) {
         const destinations = [];
         let total = 0;
         for (const row of rows) {
-          const columns = aggregate ? [scene.step.parameters.value] : scene.table.columns;
+          const columns = aggregate
+            ? model.metrics(scene.step).map((m) => m.output)
+            : scene.kind === "melt"
+              ? [scene.step.parameters.value_name]
+              : scene.kind === "pivot"
+                ? scene.step.parameters.output_columns
+                : scene.kind === "calculate"
+                  ? [scene.step.parameters.name]
+                  : scene.table.columns;
           for (const column of columns) {
             const refs = row.cell_parents[column] || [];
-            for (const ref of refs) if (aggregate || ref.step === scene.step.parents[1]) total++;
+            for (const ref of refs)
+              if (scene.kind !== "merge" || ref.step === scene.step.parents[1]) total++;
             destinations.push({
               refs,
               group: aggregate ? row.position : null,
@@ -921,7 +1180,14 @@
         const movingCount = el("span", "motion-count", "0");
         motionStatus.replaceChildren(
           movingCount,
-          el("span", "", " of " + total + " inputs animated · fully visible cells only."),
+          el(
+            "span",
+            "",
+            tx(
+              " of " + total + " inputs animated · fully visible cells only.",
+              " / " + total + "個の入力を移動しています。画面に収まる値だけを動かします。",
+            ),
+          ),
         );
         if (scene.kind === "merge") {
           for (const source of reference.querySelectorAll(".source-cell")) {
@@ -945,8 +1211,12 @@
           if (!visibleCell(target)) continue;
           const to = target.getBoundingClientRect();
           for (const ref of refs) {
-            if ((!aggregate && ref.step !== scene.step.parents[1]) || flows.length >= 48) continue;
-            const source = (aggregate ? oldCells : sources).get(
+            if (
+              (scene.kind === "merge" && ref.step !== scene.step.parents[1]) ||
+              flows.length >= 48
+            )
+              continue;
+            const source = (scene.kind === "merge" ? sources : oldCells).get(
               model.cellKey(ref.step, ref.row, ref.column),
             );
             if (source) flows.push({ source, ref, target, to, group });
@@ -954,7 +1224,7 @@
         }
         movingCount.textContent = String(flows.length);
       }
-      if (!aggregate && scene.kind !== "merge") {
+      if (!transfer) {
         const previous = new Map(oldRows.map((r) => [r.key, r])),
           used = new Set();
         for (const node of board.querySelectorAll(".data-row")) {
@@ -971,8 +1241,10 @@
         }
         // Only a filter removes rows here. A preview or a chapter jump is not
         // evidence of exclusion, so it must not manufacture departing records.
-        if (scene.kind === "filter") {
-          const kept = new Set(scene.step.parameters.selected_rows);
+        if (["filter", "drop_missing", "drop_duplicates"].includes(scene.kind)) {
+          const kept = new Set(
+            scene.step.parameters.selected_rows || scene.step.parameters.positions,
+          );
           for (const old of oldRows) {
             if (used.has(old.key)) continue;
             const position = Number(old.key.slice(old.key.lastIndexOf(":") + 1));
@@ -1079,10 +1351,14 @@
       const scene = activeScene(),
         tableData = scene.table,
         sceneKey = scene.table.id + ":" + scene.kind + ":" + (state.inspection || "");
+      workbench.sync(scene);
+      const shownColumns = workbench.columns(scene);
       const shouldAnimate =
         lastKey !== null &&
         lastKey !== sceneKey &&
         lastIndex === state.index - 1 &&
+        workbench.mode === "table" &&
+        !workbench.query &&
         !state.reduceMotion &&
         !reduced.matches &&
         !state.all &&
@@ -1106,7 +1382,7 @@
       }
       board.replaceChildren();
       columnHead.replaceChildren();
-      const allRows = orderedRows(scene),
+      const allRows = workbench.filter(orderedRows(scene)),
         paged = state.all && allRows.length > 200;
       state.tablePage = Math.min(state.tablePage, Math.max(0, Math.ceil(allRows.length / 100) - 1));
       const rowOffset = paged ? state.tablePage * 100 : 0,
@@ -1119,14 +1395,14 @@
       const viewportKey = sceneKey + ":" + state.all + ":" + state.tablePage;
       if (viewportKey !== lastViewportKey) scroll.scrollTop = 0;
       lastViewportKey = viewportKey;
-      const grid = "46px repeat(" + tableData.columns.length + ", minmax(var(--cell-min), 1fr))";
-      table.style.minWidth = "calc(49px + " + tableData.columns.length + " * var(--cell-min))";
+      const grid = "46px repeat(" + shownColumns.length + ", minmax(var(--cell-min), 1fr))";
+      table.style.minWidth = "calc(49px + " + shownColumns.length + " * var(--cell-min))";
       columnHead.style.gridTemplateColumns = grid;
-      const numberHead = el("div", "", "Row");
+      const numberHead = el("div", "", tx("Row", "行"));
       numberHead.setAttribute("role", "columnheader");
       columnHead.append(numberHead);
       const presentation = scene.step.presentation || {};
-      tableData.columns.forEach((col) => {
+      shownColumns.forEach((col) => {
         const h = el("div", "", col);
         h.title = col;
         h.setAttribute("role", "columnheader");
@@ -1134,7 +1410,7 @@
         columnHead.append(h);
       });
       table.setAttribute("aria-rowcount", String(tableData.rows.length + 1));
-      table.setAttribute("aria-colcount", String(tableData.columns.length + 1));
+      table.setAttribute("aria-colcount", String(shownColumns.length + 1));
       const geometry = layout(scene, rows);
       const rightId = scene.kind === "merge" ? scene.step.parents[1] : null;
       for (const entry of geometry.items) {
@@ -1159,15 +1435,16 @@
           node.dataset.group = entry.group < 0 ? "excluded" : String(entry.group % 6);
         const number = el("div", "row-number", String(row.position + 1));
         number.setAttribute("role", "rowheader");
-        if (["sum", "mean", "count"].includes(scene.kind)) {
+        if (entry.group !== null && scene.kind !== "group") {
           number.classList.add("with-group");
           number.append(el("span", "group-id", "G" + (entry.group + 1)));
-          number.title = model.groupTitle(scene, entry.group);
+          number.title = model.groupTitle({ step: steps.get(entry.groupStep) }, entry.group);
         }
         node.append(number);
         row.cells.forEach((cell, i) => {
           const column = tableData.columns[i],
             wrap = el("div", "cell-wrap");
+          if (!shownColumns.includes(column)) return;
           wrap.setAttribute("role", "cell");
           let originNote;
           if (rightId !== null) {
@@ -1175,7 +1452,10 @@
             if (refs.length > 0 && refs.every((r) => r.step === rightId)) {
               wrap.dataset.origin = "right";
               originNote =
-                "From " + model.tableLabel(data, steps.get(rightId)) + " row " + (refs[0].row + 1);
+                tx("From ", "入力元: ") +
+                model.tableLabel(data, steps.get(rightId)) +
+                " row " +
+                (refs[0].row + 1);
             }
           }
           wrap.append(cellButton(tableData.id, row.position, column, cell, originNote));
@@ -1183,79 +1463,174 @@
         });
         board.append(node);
       }
-      if (rows.length === 0) board.append(el("div", "empty", "No rows remain in this step."));
+      if (rows.length === 0)
+        board.append(
+          el(
+            "div",
+            "empty",
+            workbench.query
+              ? tx(
+                  "No matching rows. Clear the search to see the recorded table.",
+                  "一致する行がありません。検索を解除すると元の表示に戻ります。",
+                )
+              : tx("No rows remain in this step.", "この工程には行がありません。"),
+          ),
+        );
       board.style.height = geometry.height + "px";
-      operation.textContent = scene.kind.toUpperCase();
+      const badgeNames = {
+        source: "入力",
+        input: "参照",
+        filter: "抽出",
+        merge: "結合",
+        group: "グループ",
+        sum: "合計",
+        mean: "平均",
+        count: "件数",
+        aggregate: "集計",
+        sort: "並べ替え",
+        select: "列選択",
+        rename: "名前変更",
+        calculate: "計算",
+        drop_missing: "欠損行除外",
+        drop_duplicates: "重複除外",
+        fill_missing: "欠損補完",
+        take: "行選択",
+        astype: "型変換",
+        to_numeric: "数値変換",
+        to_datetime: "日付変換",
+        string_transform: "文字整形",
+        concat: "縦結合",
+        melt: "縦長化",
+        pivot: "横長化",
+      };
+      operation.textContent =
+        language === "ja"
+          ? badgeNames[scene.kind] || scene.kind.toUpperCase()
+          : scene.kind.toUpperCase();
       operation.dataset.kind = scene.kind;
       renderLegend(scene);
       caption.textContent = state.inspection
         ? model.tableLabel(data, tableData)
         : scene.kind === "group"
-          ? "Form the groups"
+          ? tx("Form the groups", "グループを作る")
           : model.tableLabel(data, scene.step);
       counter.textContent =
         count(tableData.rows.length, "row") + " · " + count(tableData.columns.length, "column");
       code.textContent = state.inspection
         ? scene.kind === "source"
-          ? "Recorded source table"
-          : "Recorded join input"
+          ? tx("Recorded source table", "記録した入力表")
+          : tx("Recorded join input", "記録した入力表")
         : model.description(scene);
-      let note = "Select a value to follow its source cells.";
-      if (scene.kind === "filter")
+      let note = tx(
+        "Select a value to follow its source cells.",
+        "値を選ぶと、元の入力セルまでたどれます。",
+      );
+      if (["filter", "drop_missing", "drop_duplicates"].includes(scene.kind))
         note =
           count(scene.step.parameters.removed_rows, "row") +
-          " excluded; source rows remain available.";
+          tx(
+            " excluded; source rows remain available.",
+            "を除外しました。元の行は入力表から確認できます。",
+          );
       if (scene.kind === "merge") {
         const n = scene.step.parameters.unmatched_rows;
         note =
-          count(n, "output row") +
-          (n === 1 ? " has" : " have") +
-          " no right-side match. Validation: " +
-          scene.step.parameters.validate +
-          ".";
+          language === "ja"
+            ? n +
+              "行は結合する側に一致がなく、" +
+              (scene.step.parameters.unmatched_left_rows || 0) +
+              "行は元の左側の入力がありません。"
+            : count(n, "output row") +
+              (n === 1 ? " has" : " have") +
+              tx(
+                " no right-side match. Validation: ",
+                "結合する側に一致する行がありません。照合の関係: ",
+              ) +
+              scene.step.parameters.validate +
+              "." +
+              (scene.step.parameters.unmatched_left_rows || 0
+                ? " " +
+                  scene.step.parameters.unmatched_left_rows +
+                  " output rows have no left-side match."
+                : "");
       }
-      if (["group", "sum", "mean", "count"].includes(scene.kind)) {
+      if (["group", "sum", "mean", "count", "aggregate"].includes(scene.kind)) {
         const gp = scene.step.parameters;
         note =
-          "Missing keys " +
-          (gp.dropna ? "are excluded" : "are kept") +
+          tx("Missing keys ", "欠損しているキーは") +
+          (gp.dropna ? tx("are excluded", "除外します") : tx("are kept", "残します")) +
           "; " +
           count(gp.excluded_rows, "input row") +
-          " excluded by grouping." +
+          tx(" excluded by grouping.", "がグループの条件で除外されます。") +
           (gp.min_count !== undefined ? " min_count=" + gp.min_count + "." : "");
       }
+      if (scene.kind === "calculate") {
+        const p = scene.step.parameters,
+          symbols = { add: "+", subtract: "−", multiply: "×", divide: "÷" };
+        note =
+          p.left +
+          " " +
+          symbols[p.op] +
+          " " +
+          (p.right.column || displayValue(p.right.constant)) +
+          " → " +
+          p.name;
+      }
+      if (scene.kind === "melt")
+        note = tx(
+          "Values from " +
+            scene.step.parameters.value_vars.length +
+            " columns move into one value column; column names become labels.",
+          scene.step.parameters.value_vars.length +
+            "列の値を1列にまとめ、元の列名をラベルとして残します。",
+        );
+      if (scene.kind === "pivot")
+        note = tx(
+          "Recorded values move to the matching named column. Empty combinations remain missing.",
+          "記録した値を、対応する名前の列へ移します。元の値がない組み合わせは欠損として残ります。",
+        );
       notice.textContent = presentation.note ? presentation.note + " " + note : note;
       backToStep.hidden = !state.inspection;
       renderReference(scene, rows);
       limitInfo.replaceChildren();
-      limitInfo.append(
-        el(
-          "span",
-          "",
-          paged
+      const scope = workbench.query ? "matching" : "recorded";
+      const rowSummary =
+        language === "ja"
+          ? (workbench.query ? "検索結果 " : "記録した全") +
+            allRows.length +
+            "行中 " +
+            rows.length +
+            "行を表示" +
+            (paged
+              ? " · " + (state.tablePage + 1) + "/" + Math.ceil(allRows.length / 100) + " ページ"
+              : "")
+          : paged
             ? "Page " +
-                (state.tablePage + 1) +
-                " of " +
-                Math.ceil(allRows.length / 100) +
-                " · " +
-                rows.length +
-                " of " +
-                allRows.length +
-                " recorded rows shown; calculations use all rows."
+              (state.tablePage + 1) +
+              " of " +
+              Math.ceil(allRows.length / 100) +
+              " · " +
+              rows.length +
+              " of " +
+              allRows.length +
+              " " +
+              scope +
+              " rows shown; calculations use all rows."
             : rows.length === allRows.length
-              ? "All " + allRows.length + " recorded rows shown"
+              ? "All " + allRows.length + " " + scope + " rows shown"
               : "Showing " +
                 rows.length +
                 " of " +
                 allRows.length +
-                " rows; calculations use all recorded rows.",
-        ),
-      );
+                " rows; calculations use all recorded rows.";
+      limitInfo.append(el("span", "", rowSummary));
       if (allRows.length > 12) {
         const toggle = button(
           state.all
-            ? "Show first 12"
-            : (allRows.length > 200 ? "Browse all " : "Show all ") + allRows.length,
+            ? tx("Show first 12", "先頭12行に戻す")
+            : (allRows.length > 200
+                ? tx("Browse all ", "全行をページで見る: ")
+                : tx("Show all ", "全行を表示: ")) + allRows.length,
           () => {
             stop();
             state.all = !state.all;
@@ -1273,6 +1648,16 @@
         if (i === state.index) b.setAttribute("aria-current", "step");
         else b.removeAttribute("aria-current");
       });
+      const chapter = chapterButtons[state.index],
+        navBox = nav.getBoundingClientRect(),
+        chapterBox = chapter?.getBoundingClientRect();
+      if (chapterBox) {
+        if (chapterBox.top < navBox.top) nav.scrollTop -= navBox.top - chapterBox.top;
+        else if (chapterBox.bottom > navBox.bottom)
+          nav.scrollTop += chapterBox.bottom - navBox.bottom;
+        if (chapterBox.left < navBox.left) nav.scrollLeft -= navBox.left - chapterBox.left;
+        else if (chapterBox.right > navBox.right) nav.scrollLeft += chapterBox.right - navBox.right;
+      }
       prev.disabled = state.index === 0;
       next.disabled = state.index === scenes.length - 1;
       if (!replaying)
@@ -1281,7 +1666,12 @@
           state.index === 0 ||
           state.all ||
           state.reduceMotion ||
-          reduced.matches;
+          reduced.matches ||
+          workbench.mode !== "table" ||
+          Boolean(workbench.query);
+      workbench.render(scene, allRows);
+      legend.hidden = workbench.mode !== "table";
+      motionStatus.hidden = workbench.mode !== "table";
       refreshSelection();
       if (["show-rows", "rows-previous", "rows-next"].includes(focusedAction)) {
         const control = limitInfo.querySelector('[data-action="' + focusedAction + '"]');
@@ -1290,13 +1680,27 @@
       }
       motionStatus.textContent = "";
       if (shouldAnimate) animateTransition(scene, oldRows, oldCells, rows);
-      else if (["merge", "sum", "mean", "count"].includes(scene.kind)) {
+      else if (
+        ["merge", "sum", "mean", "count", "aggregate", "melt", "pivot", "calculate"].includes(
+          scene.kind,
+        ) &&
+        workbench.mode === "table"
+      ) {
         motionStatus.textContent =
           state.reduceMotion || reduced.matches
-            ? "Motion is reduced. Select a result to inspect its inputs."
+            ? tx(
+                "Motion is reduced. Select a result to inspect its inputs.",
+                "動きを抑えて表示しています。結果のセルから入力元を確認できます。",
+              )
             : state.all
-              ? "Expanded tables stay still. Select a value to inspect its inputs."
-              : "Replay the movement to follow the visible inputs into this result.";
+              ? tx(
+                  "Expanded tables stay still. Select a value to inspect its inputs.",
+                  "全行・ページ表示中は動かしません。値を選ぶと入力元を確認できます。",
+                )
+              : tx(
+                  "Replay the movement to follow the visible inputs into this result.",
+                  "「移動をもう一度見る」で、この結果へ集まる入力を確認できます。",
+                );
       }
       lastKey = sceneKey;
       lastIndex = state.index;
@@ -1309,39 +1713,50 @@
           lastKey = null;
           render();
         };
-      const previous = button("← Previous rows", () => move(-1), "text-button"),
-        next = button("Next rows →", () => move(1), "text-button");
+      const previous = button(tx("← Previous rows", "← 前のページ"), () => move(-1), "text-button"),
+        next = button(tx("Next rows →", "次のページ →"), () => move(1), "text-button");
       previous.dataset.action = "rows-previous";
       next.dataset.action = "rows-next";
       previous.disabled = state.tablePage === 0;
       next.disabled = (state.tablePage + 1) * 100 >= allRows.length;
       const form = el("form", "jump-form"),
-        label = el("label", "", "Table row number "),
+        label = el("label", "", tx("Table row number ", "表の行番号 ")),
         number = el("input"),
         message = el("span", "jump-message");
       number.type = "number";
       number.min = "1";
-      number.max = String(allRows.length);
+      number.max = String(activeScene().table.rows.length);
       number.step = "1";
       number.value = String(allRows[state.tablePage * 100].position + 1);
       number.dataset.action = "row-number";
       label.append(number);
       message.setAttribute("role", "status");
       const jump = button(
-        "Go to row",
+        tx("Go to row", "行へ移動"),
         () => {
           const row = Number(number.value) - 1;
           if (
             !Number.isSafeInteger(row) ||
             row < 0 ||
-            row >= allRows.length ||
+            row >= activeScene().table.rows.length ||
             !number.value.trim()
           ) {
-            message.textContent = "Enter a table row number from 1 to " + allRows.length + ".";
+            message.textContent =
+              language === "ja"
+                ? "表の行番号を1〜" + activeScene().table.rows.length + "の範囲で入力してください。"
+                : "Enter a table row number from 1 to " + activeScene().table.rows.length + ".";
+            return;
+          }
+          const position = allRows.findIndex((r) => r.position === row);
+          if (position < 0) {
+            message.textContent = tx(
+              "That row is outside the search. Clear the search to visit it.",
+              "その行は検索結果に含まれません。検索を解除して確認してください。",
+            );
             return;
           }
           stop();
-          state.tablePage = Math.floor(allRows.findIndex((r) => r.position === row) / 100);
+          state.tablePage = Math.floor(position / 100);
           lastKey = null;
           render();
           revealCell({
@@ -1362,7 +1777,14 @@
       limitInfo.append(pager);
     }
     window.addEventListener("resize", settleAnimations);
-    document.addEventListener("scroll", settleAnimations, true);
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        if (event.target === nav) return;
+        settleAnimations();
+      },
+      true,
+    );
     render();
     root.dataset.ready = "true";
     document.addEventListener("visibilitychange", () => {
@@ -1376,7 +1798,13 @@
       render();
     });
   } catch (error) {
-    root.replaceChildren(el("div", "error", "Could not load this story: " + error.message));
+    root.replaceChildren(
+      el(
+        "div",
+        "error",
+        tx("Could not load this story: ", "ストーリーを読み込めませんでした: ") + error.message,
+      ),
+    );
     root.dataset.ready = "error";
   }
 })();
