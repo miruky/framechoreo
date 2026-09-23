@@ -18,6 +18,7 @@ npm run format:check
 python tests/check_wire.py
 python -m ruff check .
 python -m ruff format --check .
+python -m mypy src/framechoreo
 ```
 
 Python tests block network connections. Examples and test fixtures must use
@@ -36,13 +37,15 @@ clear contract for value inputs and row membership.
 
 ## Player changes
 
-Run the Node model and DOM tests and generate the examples. DOM tests use jsdom
+Run the Node model, DOM, and axe-core accessibility tests and generate the examples. DOM tests use jsdom
 with a controlled clock; they test actual player controls, not real browser layout.
 `check_wire.py` compares Python and JavaScript source-cell traversal. Keep JavaScript
 and CSS formatted with `npm run format`. Inspect normal playback,
 backward navigation, source-cell inspection, empty output, narrow screens, and
 reduced motion. Cell text must never be inserted as executable HTML. Keep the
-export free of external requests.
+export free of external requests. Chart code lives in `charts.js`; each plotted
+point must still open its recorded cell. Automated accessibility checks cannot
+measure real color contrast or screen-reader behavior; inspect those separately.
 
 ## Build
 
@@ -60,6 +63,9 @@ The distribution checker expects one wheel and one sdist in `dist/`. It checks
 archive contents against the source, creates a separate virtual environment,
 installs the wheel and runtime dependencies, then runs the README example with
 runtime connections blocked. Dependency installation itself needs package access.
+Review `export_info()["sources"]` before sharing actual data and use
+`approved_source_columns` to reject unreviewed fields. This checks the schema,
+not the contents of approved cells.
 
 For notebook changes, install `.[dev,notebook]` and run `python tests/check_notebook.py`.
 This executes the shipped example in a temporary kernel, checks the rich outputs,

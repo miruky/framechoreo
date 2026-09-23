@@ -6,11 +6,17 @@ does not mean a GitHub repository or PyPI project already exists.
 1. Confirm the project name and inspect the final source diff.
 2. Run Python tests on both supported pandas lines, player-model tests, and lint.
 3. Generate examples and inspect the player in a browser, including a narrow view.
+   Run the DOM accessibility check and inspect focus, contrast, and a screen
+   reader in real browsers; the automated check alone is incomplete.
 4. Build wheel and sdist, run `twine check`, and install the wheel outside the checkout.
 5. Check the distributions for assets, license, docs, tests, and accidental private data.
+   Review `export_info()["sources"]` and use source-column approval for any
+   non-synthetic story intended for sharing.
 6. Create the public repository only when publication is authorized. Enable its
    issue reporting and private vulnerability-reporting features as appropriate.
 7. Run the configured CI on the actual repository before relying on its platform matrix.
+   Complete the [reader evaluation protocol](reader-evaluation.md) before claiming
+   teaching effectiveness or an accessible stable 1.0 experience.
 8. Set the release date in CHANGELOG and update installation instructions when a
    real PyPI release exists. Add verified project URLs to package metadata.
 9. Configure the PyPI project and trusted publishing, or follow PyPI's supported
@@ -42,11 +48,15 @@ The included workflow runs checks only; no publisher, token, or upload job is co
 ```sh
 python -m pytest
 npm ci
+npm audit
 npm test
 npm run format:check
 python tests/check_wire.py
 python -m ruff check .
 python -m ruff format --check .
+python -m mypy src/framechoreo
+python -m pip install pip-audit==2.10.1
+python -m pip_audit .
 python examples/sales_story.py
 python examples/missing_values.py
 python examples/classroom.py
@@ -64,6 +74,7 @@ python examples/rank_workflow.py
 python examples/growth_workflow.py
 python examples/time_buckets_workflow.py
 python examples/large_group_workflow.py --rows 1000
+python examples/large_window_workflow.py --rows 1000
 python examples/large_analysis.py --rows 2000
 python -m build
 python -m twine check dist/*
@@ -75,7 +86,7 @@ and open `examples/notebook.ipynb` in JupyterLab to inspect the embedded control
 
 ## Candidate status
 
-The current version is `1.0.0rc5`; it is a local candidate and has not been uploaded.
+The current version is `1.0.0rc6`; it is a local candidate and has not been uploaded.
 The public Python surface and migration boundaries are in [the 1.0 guide](v1.md).
 Generated HTML carries the bundled player's MIT notice separately from the user's
 content. This does not complete account setup, verified public URLs, a Git-history

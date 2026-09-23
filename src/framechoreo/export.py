@@ -24,6 +24,7 @@ def render_html(
     css = assets.joinpath("player.css").read_text(encoding="utf-8")
     css += "\n" + assets.joinpath("workbench.css").read_text(encoding="utf-8")
     model = assets.joinpath("model.js").read_text(encoding="utf-8")
+    charts = assets.joinpath("charts.js").read_text(encoding="utf-8")
     workbench = assets.joinpath("workbench.js").read_text(encoding="utf-8")
     player = assets.joinpath("player.js").read_text(encoding="utf-8")
     license_text = assets.joinpath("LICENSE.txt").read_text(encoding="utf-8")
@@ -71,7 +72,8 @@ def render_html(
         '<details id="framechoreo-license" class="player-license">'
         f"<summary>{license_label}</summary>"
         f"<p>{license_scope}</p><pre>{html.escape(license_text, quote=False)}</pre></details>\n"
-        f"<script>{model}</script>\n<script>{workbench}</script>\n<script>{player}</script>\n</body>\n</html>\n"
+        f"<script>{model}</script>\n<script>{charts}</script>\n"
+        f"<script>{workbench}</script>\n<script>{player}</script>\n</body>\n</html>\n"
     )
 
 

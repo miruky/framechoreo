@@ -26,7 +26,7 @@ change existing records or their lineage traversal budget.
 ### table
 
 ```python
-frame = story.table(df, name="Sales")
+frame = story.table(df, name="Sales", include_columns=["product", "amount"])
 ```
 
 Copies the DataFrame and records it as a source. Supported cells are strings,
@@ -36,6 +36,9 @@ Decimal NaNs are missing values. NumPy floating scalars use their native text
 formatting. Mutable nested objects and unsupported types are rejected. Columns
 must have unique, nonempty string names. The original index is preserved internally
 but is not automatically published as a displayed column.
+`include_columns` is an optional ordered allowlist. Fields left out of it never
+enter the captured source or any later export. The original DataFrame is not
+changed. Invalid or empty allowlists fail before a step is recorded.
 
 Axis buffers and categorical dictionaries are detached as well as ordinary data.
 Unpaired Unicode surrogates are rejected during capture, before a snapshot is added.
@@ -82,6 +85,14 @@ story.export_html("story.html", result=frame, theme="auto", overwrite=False, com
 story.export_info(result=frame)
 ```
 
+For reviewed sharing, inspect `export_info()["sources"]`. Each entry gives a
+source step ID, name, row count, and complete column list. Then pass a mapping
+from every source step ID to its exact approved column list as
+`approved_source_columns=...` to `to_json`, `to_html`, or `export_html`. A missing
+source, added field, or reordered list raises before export. This checks field
+names, not sensitive values inside an approved field. `to_dict()` and notebook
+display are not reviewed-export gates; use `include_columns` at capture time.
+
 `result` defaults to the most recently recorded step. Only that step's ancestors
 are included. An empty story can return an empty dictionary payload, but cannot
 export a player. The dictionary is detached from the story and can be changed by
@@ -108,6 +119,24 @@ Displaying an empty story shows a short start hint; explicit HTML export still
 requires a recorded table.
 
 ## StoryFrame
+
+### Familiar pandas-style methods
+
+```python
+clean = frame.dropna(subset="amount").fillna({"amount": 0}).rename(columns={"amount": "sales"})
+summary = clean.groupby("category", dropna=False).agg(
+    total=("sales", "sum"), count=("sales", "count")
+)
+group_total = clean.groupby("category", dropna=False)["sales"].transform("group_total", "sum")
+```
+
+These are thin aliases and a checked `RecordedGroupBy` facade over the explicit
+operations below. `dropna`, `fillna`, and `rename` retain their recorded value
+sources. `groupby` requires an explicit `dropna` policy; selected columns support
+`sum`, `mean`, `count`, and row-preserving `transform`, while named `agg` uses the
+same metrics as `group_agg`. Unsupported pandas calls are not intercepted or
+given guessed provenance. This reduces rewriting for common chains without
+claiming automatic tracing of arbitrary pandas code.
 
 ### calculate, sort_values, select_columns, and rename_columns
 
@@ -290,10 +319,12 @@ for a minimum or maximum. Group-key and missing-window decisions are kept
 separately. Cumulative results at a missing current row have no value input
 and retain that missing cell as a control input.
 
-Explicit window provenance is limited to 250,000 value plus control references
-per operation. A larger expansion raises `CaptureLimitError` before adding a
-step. This is separate from row/cell/JSON capture budgets; a long cumulative
-sequence can hit it even when its input table fits the analysis profile.
+When a cumulative or fixed rolling window would repeat more than 250,000 value
+and control references, the export stores group membership plus a prefix or
+fixed range instead. The exact ordered sources remain available through
+`explain_page` and the player's input-number jump. Such stories use display
+schema version 2, and the bundled player still reads older schema version 1
+stories. Row, cell, JSON-byte, and available-memory limits still apply.
 
 ### merge
 

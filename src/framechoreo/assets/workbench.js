@@ -3,7 +3,16 @@
   "use strict";
   function create(o) {
     const { data, steps, scenes, el, button, cellButton, displayValue, tx } = o;
-    let state = { table: null, mode: "table", query: "", columns: null, metric: "", before: null };
+    let state = {
+      table: null,
+      mode: "table",
+      query: "",
+      columns: null,
+      metric: "",
+      chartKind: "bar",
+      xMetric: "",
+      before: null,
+    };
     const profileCache = new Map();
     function profile(table) {
       if (profileCache.has(table.id)) return profileCache.get(table.id);
@@ -190,6 +199,8 @@
         state.query = "";
         state.columns = null;
         state.metric = "";
+        state.chartKind = "bar";
+        state.xMetric = "";
         state.before = null;
       }
     }
@@ -382,139 +393,19 @@
         panel.append(row);
       }
     }
-    function number(cell) {
-      if (cell.type === "integer") {
-        const n = BigInt(cell.value);
-        if (n < -9007199254740991n || n > 9007199254740991n) return null;
-      } else if (cell.type !== "float") return null;
-      const n = Number(cell.value);
-      return Number.isFinite(n) ? n : null;
-    }
     function renderChart(scene, rows) {
-      const panel = panels.chart;
-      panel.replaceChildren();
-      const candidates = scene.table.columns.filter((_, i) =>
-        scene.table.rows.some((r) => ["integer", "float"].includes(r.cells[i].type)),
-      );
-      if (!candidates.length) {
-        panel.append(
-          el(
-            "p",
-            "empty",
-            tx(
-              "Choose a step with numeric columns to view a chart.",
-              "数値列のある工程を選ぶとグラフを表示できます。",
-            ),
-          ),
-        );
-        return;
-      }
-      if (!candidates.includes(state.metric)) state.metric = candidates[0];
-      const label = el("label", "chart-choice", tx("Value ", "表示する値 ")),
-        select = el("select");
-      select.dataset.action = "chart-column";
-      for (const column of candidates) {
-        const option = el("option", "", column);
-        option.value = column;
-        select.append(option);
-      }
-      select.value = state.metric;
-      select.addEventListener("change", () => {
-        state.metric = select.value;
-        o.change(false);
-        panels.chart.querySelector('[data-action="chart-column"]')?.focus({ preventScroll: true });
+      root.FrameChoreoCharts.render({
+        panel: panels.chart,
+        scene,
+        rows,
+        state,
+        el,
+        cellButton,
+        displayValue,
+        tx,
+        change: o.change,
+        steps,
       });
-      label.append(select);
-      panel.append(label);
-      const shown = rows.slice(0, 20),
-        index = scene.table.columns.indexOf(state.metric),
-        values = shown.map((r) => number(r.cells[index])),
-        finite = values.filter((n) => n !== null),
-        scale = Math.max(1, ...finite.map(Math.abs)),
-        low = Math.min(0, ...finite.map((n) => n / scale)),
-        high = Math.max(0, ...finite.map((n) => n / scale)),
-        range = high - low || 1,
-        zero = (100 * -low) / range;
-      panel.append(
-        el(
-          "p",
-          "panel-caption",
-          shown.length +
-            tx(" of ", " / ") +
-            rows.length +
-            tx(
-              " rows shown. Bar lengths are approximate; the recorded value text is unchanged.",
-              " 行を表示。棒の長さは近似ですが、表示する値は記録したものです。",
-            ),
-        ),
-      );
-      const chart = el("div", "bar-chart");
-      const labelColumn = scene.table.columns.findIndex(
-        (c, i) => c !== state.metric && shown.some((r) => r.cells[i].type === "string"),
-      );
-      shown.forEach((row, i) => {
-        const b = cellButton(scene.table.id, row.position, state.metric, row.cells[index]);
-        b.classList.add("chart-value");
-        const rowLabel =
-          labelColumn >= 0
-            ? displayValue(row.cells[labelColumn])
-            : tx("Row ", "行 ") + (row.position + 1);
-        b.setAttribute(
-          "aria-label",
-          rowLabel +
-            " · " +
-            tx("row ", "行 ") +
-            (row.position + 1) +
-            " · " +
-            state.metric +
-            ": " +
-            displayValue(row.cells[index]) +
-            tx("; trace value inputs", "：入力元を確認"),
-        );
-        b.replaceChildren();
-        b.dataset.group = String(
-          (root.FrameChoreoModel.groupIdentity(steps, scene.table.id, row.position)?.row ??
-            row.position) % 6,
-        );
-        const track = el("span", "bar-track"),
-          axis = el("span", "bar-zero"),
-          fill = el("span", "bar-fill");
-        axis.style.left = zero + "%";
-        track.setAttribute("aria-hidden", "true");
-        const v = values[i];
-        if (v !== null) {
-          fill.style.left = (v < 0 ? (100 * (v / scale - low)) / range : zero) + "%";
-          fill.style.width = (100 * Math.abs(v / scale)) / range + "%";
-        } else {
-          fill.style.width = "0%";
-          b.classList.add("uncharted-value");
-        }
-        track.append(axis, fill);
-        b.append(
-          el(
-            "span",
-            "bar-label",
-            labelColumn >= 0
-              ? displayValue(row.cells[labelColumn])
-              : tx("Row ", "行 ") + (row.position + 1),
-          ),
-          track,
-          el("span", "bar-value", displayValue(row.cells[index])),
-        );
-        chart.append(b);
-      });
-      panel.append(chart);
-      if (values.some((v) => v === null))
-        panel.append(
-          el(
-            "p",
-            "panel-caption",
-            tx(
-              "Nonnumeric, missing, non-finite, and unsafe-integer values have no bar. Their recorded values remain inspectable.",
-              "数値でない値・欠損・非有限値・大きすぎる整数には棒を描きません。値そのものは確認できます。",
-            ),
-          ),
-        );
     }
     function render(scene, rows) {
       const table = scene.table,

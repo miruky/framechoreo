@@ -8,6 +8,7 @@
     "format:check": "prettier --check \"src/framechoreo/assets/*.{js,css}\" \"tests/*.cjs\" package.json .prettierrc.json"
   },
   "devDependencies": {
+    "axe-core": "4.13.0",
     "jsdom": "26.1.0",
     "prettier": "3.9.8"
   }

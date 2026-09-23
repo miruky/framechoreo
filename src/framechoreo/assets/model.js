@@ -592,8 +592,20 @@
         !Array.isArray(p.groups)
       )
         invalid("invalid window settings");
-      const seen = new Set();
-      for (const group of p.groups) {
+      const seen = new Set(),
+        compressed = ["window_prefix", "window_range"].includes(p.lineage_encoding);
+      if (
+        compressed &&
+        (!Array.isArray(p.row_groups) ||
+          p.row_groups.length !== parent.rows.length ||
+          !Array.isArray(p.row_offsets) ||
+          p.row_offsets.length !== parent.rows.length ||
+          (p.lineage_encoding === "window_prefix" &&
+            !["cumsum", "cummin", "cummax"].includes(p.op)) ||
+          (p.lineage_encoding === "window_range" && !p.op.startsWith("rolling_")))
+      )
+        invalid("invalid shared window settings");
+      for (const [groupIndex, group] of p.groups.entries()) {
         if (!Array.isArray(group) || !group.length) invalid("empty window group");
         group.forEach((position, j) => {
           if (
@@ -605,6 +617,23 @@
           )
             invalid("invalid window group membership");
           seen.add(position);
+          if (compressed) {
+            const row = step.rows[position];
+            if (
+              p.row_groups[position] !== groupIndex ||
+              p.row_offsets[position] !== j ||
+              !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+              !sameRefs(row.cell_parents[p.name], []) ||
+              !record(row.cell_controls) ||
+              !sameList(Object.keys(row.cell_controls), [p.name]) ||
+              !sameRefs(row.cell_controls[p.name], [])
+            )
+              invalid("inconsistent shared window inputs");
+            for (const column of columns)
+              if (!sameRefs(row.cell_parents[column], [ref(position, column)]))
+                invalid("inconsistent unchanged window value");
+            return;
+          }
           const row = step.rows[position],
             range = group.slice(Math.max(0, j - p.size + 1), j + 1),
             present = (position) =>
@@ -1106,8 +1135,12 @@
       if (
         p.lineage_encoding !== undefined &&
         (data.schema_version !== 2 ||
-          !["group_transform", "rank_within"].includes(step.operation) ||
-          p.lineage_encoding !== "shared_group")
+          !(
+            (p.lineage_encoding === "shared_group" &&
+              ["group_transform", "rank_within"].includes(step.operation)) ||
+            (["window_prefix", "window_range"].includes(p.lineage_encoding) &&
+              step.operation === "window")
+          ))
       )
         invalid("invalid shared lineage encoding");
       validateWorkflow(step, steps, invalid);
@@ -1618,9 +1651,33 @@
     cache.set(groupIndex, refs);
     return refs;
   }
+  function compactWindowMembers(step, row) {
+    const p = step.parameters,
+      members = p.groups[p.row_groups[row]],
+      offset = p.row_offsets[row];
+    return p.lineage_encoding === "window_range"
+      ? members.slice(Math.max(0, offset - p.size + 1), offset + 1)
+      : members.slice(0, offset + 1);
+  }
   function valueParents(steps, reference) {
     const step = validateReference(steps, reference),
       p = step.parameters;
+    if (
+      step.operation === "window" &&
+      ["window_prefix", "window_range"].includes(p.lineage_encoding) &&
+      reference.column === p.name
+    ) {
+      const parent = steps.get(step.parents[0]),
+        index = parent.columns.indexOf(p.column);
+      if (
+        p.lineage_encoding === "window_prefix" &&
+        parent.rows[reference.row].cells[index].type === "missing"
+      )
+        return [];
+      return compactWindowMembers(step, reference.row)
+        .filter((position) => parent.rows[position].cells[index].type !== "missing")
+        .map((row) => ({ step: parent.id, row, column: p.column }));
+    }
     if (
       p.lineage_encoding === "shared_group" &&
       ["group_transform", "rank_within"].includes(step.operation) &&
@@ -1642,6 +1699,40 @@
     const step = validateReference(steps, reference),
       p = step.parameters,
       row = step.rows[reference.row];
+    if (
+      step.operation === "window" &&
+      ["window_prefix", "window_range"].includes(p.lineage_encoding) &&
+      reference.column === p.name
+    ) {
+      const parent = steps.get(step.parents[0]),
+        index = parent.columns.indexOf(p.column);
+      if (
+        p.lineage_encoding === "window_prefix" &&
+        parent.rows[reference.row].cells[index].type === "missing"
+      )
+        return [
+          ...p.by.map((column) => ({ step: parent.id, row: reference.row, column })),
+          { step: parent.id, row: reference.row, column: p.column },
+        ];
+      const members = compactWindowMembers(step, reference.row),
+        candidates = members.filter(
+          (position) => parent.rows[position].cells[index].type !== "missing",
+        ),
+        keyPositions =
+          p.lineage_encoding === "window_range"
+            ? [...new Set([...candidates, reference.row])]
+            : candidates;
+      return [
+        ...keyPositions.flatMap((position) =>
+          p.by.map((column) => ({ step: parent.id, row: position, column })),
+        ),
+        ...(p.lineage_encoding === "window_range"
+          ? members
+              .filter((position) => parent.rows[position].cells[index].type === "missing")
+              .map((position) => ({ step: parent.id, row: position, column: p.column }))
+          : []),
+      ];
+    }
     if (
       p.lineage_encoding === "shared_group" &&
       ["group_transform", "rank_within"].includes(step.operation) &&
@@ -1904,7 +1995,7 @@
               (p.ascending ? "Lower values rank first." : "Higher values rank first."),
       };
     if (step.operation === "window" && reference.column === p.name) {
-      const count = row.cell_parents[p.name].length;
+      const count = valueParents(steps, reference).length;
       if (p.op === "lag" && count === 0)
         return {
           text: "No earlier row exists at this lag within the group; the result is missing.",
@@ -2075,6 +2166,7 @@
       ? label + " (source " + (sources.findIndex((item) => item.id === step.id) + 1) + ")"
       : label;
   }
+  const windowGroupCache = new WeakMap();
   function groupIdentity(steps, stepId, position) {
     const seen = new Set();
     while (!seen.has(stepId)) {
@@ -2087,6 +2179,18 @@
       if (["group_transform", "rank_within"].includes(step.operation)) {
         const group = step.parameters.row_groups[position];
         return group === null ? null : { step: stepId, row: group };
+      }
+      if (step.operation === "window") {
+        if (!step.parameters.by.length) return null;
+        let groups = windowGroupCache.get(step);
+        if (!groups) {
+          groups = Array(step.rows.length).fill(null);
+          step.parameters.groups.forEach((members, index) =>
+            members.forEach((member) => (groups[member] = index)),
+          );
+          windowGroupCache.set(step, groups);
+        }
+        return groups[position] === null ? null : { step: stepId, row: groups[position] };
       }
       if (step.operation === "time_resample") return { step: stepId, row: position };
       if (["source", "concat", "pivot", "melt"].includes(step.operation)) return null;
@@ -2106,7 +2210,7 @@
         group = p.by.map((key) => key + ": " + row.cells[step.columns.indexOf(key)].display);
       return [...group, p.on + ": " + time].join(" · ");
     }
-    const rowPosition = ["group_transform", "rank_within"].includes(scene.step.operation)
+    const rowPosition = ["group_transform", "rank_within", "window"].includes(scene.step.operation)
       ? scene.step.parameters.groups[groupIndex][0]
       : groupIndex;
     const row = scene.step.rows[rowPosition];

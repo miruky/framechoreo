@@ -387,6 +387,7 @@
     const columnDtype = el("div", "value-type column-dtype");
     const selectionLegend = el("div", "value-type selection-legend");
     const lineagePath = el("div", "lineage-path");
+    lineagePath.setAttribute("role", "group");
     lineagePath.setAttribute(
       "aria-label",
       tx("Steps traversed by these value inputs", "値の入力元をたどった工程"),

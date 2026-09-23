@@ -511,6 +511,25 @@ main {
   flex-direction: column;
   gap: 7px;
 }
+.chart-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.chart-group-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+.chart-group-chip {
+  border-left: 3px solid var(--group-color, var(--accent));
+  border-radius: 4px;
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 11px;
+  padding: 5px 8px;
+}
 .chart-value {
   display: grid;
   grid-template-columns: minmax(65px, 0.8fr) minmax(80px, 2.5fr) minmax(60px, 0.8fr);
@@ -553,6 +572,108 @@ main {
   width: 1px;
   background: var(--line);
   z-index: 1;
+}
+.plot-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+.point-plot {
+  position: relative;
+  width: 720px;
+  height: 245px;
+  background:
+    linear-gradient(
+      to right,
+      transparent 47px,
+      var(--line) 47px,
+      var(--line) 48px,
+      transparent 48px
+    ),
+    linear-gradient(to top, transparent 29px, var(--line) 29px, var(--line) 30px, transparent 30px),
+    repeating-linear-gradient(to top, transparent 0 45px, var(--soft) 46px 47px);
+}
+.plot-axis {
+  position: absolute;
+  z-index: 0;
+  max-width: 170px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plot-axis.x-start {
+  left: 48px;
+  bottom: 4px;
+}
+.plot-axis.x-end {
+  right: 48px;
+  bottom: 4px;
+  text-align: right;
+}
+.plot-axis.y-high {
+  left: 4px;
+  top: 22px;
+}
+.plot-axis.y-low {
+  left: 4px;
+  bottom: 26px;
+}
+.plot-segment {
+  position: absolute;
+  height: 2px;
+  background: var(--group-color, var(--accent));
+  opacity: 0.7;
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+.chart-value.plot-point {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--group-color, var(--accent));
+  box-shadow: 0 0 0 1px var(--line);
+  transform: translate(-50%, -50%);
+}
+.chart-value.plot-point:hover,
+.chart-value.plot-point:focus-visible {
+  z-index: 2;
+  box-shadow:
+    0 0 0 3px var(--select),
+    0 0 0 5px var(--group-color, var(--accent));
+}
+.point-mark {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--paper);
+}
+.plot-unplotted {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.plot-unplotted .panel-caption {
+  width: 100%;
+  margin-bottom: 0;
+}
+.chart-value.unplotted-point {
+  display: flex;
+  width: auto;
+  gap: 10px;
+  padding: 7px 10px;
+  border-left: 3px solid var(--group-color, var(--accent));
 }
 .uncharted-value .bar-track {
   background: transparent;

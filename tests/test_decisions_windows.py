@@ -5,7 +5,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from framechoreo import CaptureLimitError, DataStory, col
+from framechoreo import DataStory, col
 
 
 def origins(frame, row, field):
@@ -186,7 +186,7 @@ def test_window_boundary_and_missing_values_do_not_claim_nonexistent_input():
     assert [(o.row, o.column) for o in cumulative.explain_controls(1, "running")] == [(1, "v")]
 
 
-def test_window_uses_missing_group_keys_and_rejects_provenance_explosion():
+def test_window_uses_missing_group_keys_and_compacts_cumulative_prefixes():
     df = pd.DataFrame({"g": [None, "x", None], "v": [1.0, 2.0, 3.0]})
     result = DataStory().table(df, name="raw").window("previous", column="v", op="lag", by="g")
     pd.testing.assert_series_equal(
@@ -196,9 +196,40 @@ def test_window_uses_missing_group_keys_and_rejects_provenance_explosion():
     assert origins(result, 2, "previous") == [("raw", 0, "v")]
     story = DataStory.for_analysis()
     source = story.table(pd.DataFrame({"v": range(1000)}))
-    with pytest.raises(CaptureLimitError, match="250,000"):
-        source.window("running", column="v", op="cumsum")
-    assert len(story.to_dict()["steps"]) == 1
+    running = source.window("running", column="v", op="cumsum")
+    assert running.to_pandas()["running"].iloc[-1] == 499500
+    payload = story.to_dict(result=running)
+    assert payload["schema_version"] == 2
+    assert payload["steps"][-1]["parameters"]["lineage_encoding"] == "window_prefix"
+    assert payload["steps"][-1]["rows"][-1]["cell_parents"]["running"] == []
+    page = running.explain_page(999, "running", offset=998)
+    assert page.total == 1000
+    assert [origin.row for origin in page.origins] == [998, 999]
+    rolling = source.window("rolling", column="v", op="rolling_sum", size=1000, min_periods=1)
+    assert rolling.to_pandas()["rolling"].iloc[-1] == 499500.0
+    rolling_payload = story.to_dict(result=rolling)
+    assert rolling_payload["steps"][-1]["parameters"]["lineage_encoding"] == "window_range"
+    last_page = rolling.explain_page(999, "rolling", offset=998)
+    assert last_page.total == 1000
+    assert [origin.row for origin in last_page.origins] == [998, 999]
+    assert len(story._steps) == 3
+
+
+def test_large_rolling_window_keeps_missing_member_as_control():
+    story = DataStory.for_analysis()
+    values = pd.array([*range(500), None, *range(501, 1000)], dtype="Int64")
+    source = story.table(pd.DataFrame({"g": ["A"] * 1000, "v": values}), name="raw")
+    rolling = source.window("recent", column="v", op="rolling_sum", by="g", size=800, min_periods=1)
+    assert story.to_dict(result=rolling)["steps"][-1]["parameters"]["lineage_encoding"] == (
+        "window_range"
+    )
+    assert rolling.explain_page(999, "recent").total == 799
+    assert [origin.row for origin in rolling.explain_page(999, "recent", offset=798).origins] == [
+        999
+    ]
+    controls = [(origin.row, origin.column) for origin in rolling.explain_controls(999, "recent")]
+    assert len(controls) == 800
+    assert controls[-1] == (500, "v")
 
 
 @settings(max_examples=35, deadline=None)

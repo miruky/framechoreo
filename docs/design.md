@@ -120,11 +120,14 @@ The analysis profile adds a cumulative cell budget. Large table views use 100-ro
 pages; source-use lists use 50-input pages and counted subtree skipping. The player
 validates and indexes a story at load and reuses that index for inspection. Source
 highlighting uses reachable cells without expanding every repeated source use.
-Window calculations use pandas for results and explicit positional references
-for their contributing rows. A cumulative sequence can create quadratic
-provenance, so one window step fails at 250,000 explicit value/control
-references. This remains an honest bound rather than silent sampling or a
-claim of 50,000-row cumulative support.
+Window calculations use pandas for results and positional membership for their
+contributing rows. Cumulative prefixes and fixed rolling ranges can create
+quadratic repeated references. Above 250,000 would-be value/control references,
+schema version 2 records `window_prefix` or `window_range` membership instead.
+Python and JavaScript reconstruct the selected window's exact ordered candidates,
+including missing cells kept only as decision controls. A 50,000-row cumulative
+example was exported and its last raw input was reached; this does not remove
+capture limits or the cost of inspecting 50,000 distinct source cells.
 `group_transform` and `rank_within` repeat one group's candidates across many
 rows. Their Python snapshots reuse the same candidate tuples. Above 250,000
 would-be value/control references, the export writes schema version 2 with
@@ -151,6 +154,13 @@ JSON is a versioned display model; it is not a general pandas round-trip format.
 Self-contained HTML includes the matching player and is the primary sharing format. No external font, CDN, telemetry, API
 key, server, or third-party rendering service is used.
 
+Source allowlists are applied before the first snapshot; an excluded field is
+never retained in the story. A reviewed export can require exact approval of
+every ancestor source's column names, keyed by step ID so duplicate display
+names do not collide. It cannot classify sensitive values inside an approved
+field or redact rows after capture. The source manifest is therefore a human
+review aid, not an anonymization guarantee.
+
 ## Deliberate boundaries
 
 The library does not promise arbitrary code tracing, a semantic explanation of
@@ -176,7 +186,9 @@ checks profile shape and missing counts. Uniqueness and duplicate statistics fol
 pandas, not approximate comparisons of display strings.
 
 `workbench.js` owns reader-only view state: search, visible fields, comparison,
-quality, and charts. The player retains calculation and lineage state. Returning from
+quality, and chart selection. `charts.js` renders bars, line segments, and scatter
+points as focusable links to recorded cells. The player retains calculation and
+lineage state. Returning from
 an origin restores the reader view as well as the recorded selection. Plot lengths
 are approximate, while value text and provenance are authoritative recordings. No
 recorded DataFrame is recomputed or edited in the browser.

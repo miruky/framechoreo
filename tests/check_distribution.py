@@ -34,12 +34,14 @@ def main() -> None:
                 assert archive.read(name) == (root / "src" / name).read_bytes(), name
         for name in [
             "assets/model.js",
+            "assets/charts.js",
             "assets/player.js",
             "assets/player.css",
             "assets/workbench.js",
             "assets/workbench.css",
             "assets/LICENSE.txt",
             "profile.py",
+            "authoring.py",
             "py.typed",
         ]:
             assert "framechoreo/" + name in wheel_names
@@ -88,6 +90,10 @@ def main() -> None:
             "tests/player-shared-group.test.cjs",
             "tests/player-pct-change.test.cjs",
             "tests/player-time-buckets.test.cjs",
+            "tests/player-accessibility.test.cjs",
+            "tests/player-charts.test.cjs",
+            "tests/player-prefix-window.test.cjs",
+            "tests/player-range-window.test.cjs",
             "tests/test_decisions_windows.py",
             "tests/test_join_audit.py",
             "tests/test_group_transform.py",
@@ -97,6 +103,8 @@ def main() -> None:
             "tests/test_rank_within.py",
             "tests/test_pct_change.py",
             "tests/test_time_resample.py",
+            "tests/test_authoring.py",
+            "tests/test_privacy.py",
             "tests/make_decision_fixture.py",
             "tests/make_join_audit_fixture.py",
             "tests/make_group_transform_fixture.py",
@@ -107,6 +115,8 @@ def main() -> None:
             "tests/make_shared_group_fixture.py",
             "tests/make_growth_fixture.py",
             "tests/make_time_buckets_fixture.py",
+            "tests/make_prefix_fixture.py",
+            "tests/make_range_fixture.py",
             "tests/fixtures/retail.json",
             "tests/fixtures/reshape.json",
             "tests/fixtures/decisions.json",
@@ -120,6 +130,8 @@ def main() -> None:
             "tests/fixtures/shared_group.json",
             "tests/fixtures/growth.json",
             "tests/fixtures/time_buckets.json",
+            "tests/fixtures/prefix_window.json",
+            "tests/fixtures/range_window.json",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -141,9 +153,11 @@ def main() -> None:
             "examples/growth_workflow.py",
             "examples/time_buckets_workflow.py",
             "examples/large_group_workflow.py",
+            "examples/large_window_workflow.py",
             "docs/v1.md",
             "docs/analysis.md",
             "docs/api.md",
+            "docs/reader-evaluation.md",
             "LICENSE",
         ]:
             assert prefix + "/" + name in sdist_names, name
@@ -206,7 +220,8 @@ wide = long.pivot(index="id",columns="variable",values="value")
 assert wide.to_pandas()["func"].tolist() == [20,0,30]
 assert clean.profile()["missing_cells"] == 0
 workflow_html = workflow.to_html(result=wide)
-assert 'FrameChoreoWorkbench' in workflow_html and 'framechoreo-license' in workflow_html
+assert 'FrameChoreoWorkbench' in workflow_html and 'FrameChoreoCharts' in workflow_html
+assert 'framechoreo-license' in workflow_html
 assert 'lang="ja"' in workflow_html
 from framechoreo import col, where
 decisions = DataStory()
@@ -284,6 +299,26 @@ bucket_source = bucket_story.table(pd.DataFrame({
 bucket_result = bucket_source.resample_time(on="time",value="v",rule="3min")
 assert bucket_story.to_dict(result=bucket_result)["steps"][-1]["parameters"]["empty_bins"] == [1]
 assert bucket_result.explain(1,"v") == ()
+approved_story = DataStory()
+approved_source = approved_story.table(
+    pd.DataFrame({"safe":[1],"secret":[2]}), include_columns=["safe"]
+)
+manifest = approved_story.export_info()
+assert manifest["sources"][0]["columns"] == ["safe"]
+assert "secret" not in approved_story.to_json(
+    approved_source_columns={approved_source.step_id:["safe"]}
+)
+facade_source = DataStory().table(pd.DataFrame({"g":["A","A"],"v":[1,2]}))
+facade_total = facade_source.groupby("g",dropna=False)["v"].sum()
+assert facade_total.to_pandas()["v"].tolist() == [3]
+prefix_story = DataStory.for_analysis()
+prefix_source = prefix_story.table(pd.DataFrame({"v":range(1000)}))
+prefix = prefix_source.window("running",column="v",op="cumsum")
+range_result = prefix_source.window("recent",column="v",op="rolling_sum",size=1000,min_periods=1)
+assert prefix_story.to_dict(result=prefix)["schema_version"] == 2
+assert prefix_story.to_dict(result=range_result)["schema_version"] == 2
+assert prefix.explain_page(999,"running",offset=999).origins[0].row == 999
+assert range_result.explain_page(999,"recent",offset=999).origins[0].row == 999
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
@@ -299,6 +334,8 @@ print(json.dumps({
     "shared_rows": len(shared_rank.to_pandas()),
     "growth_rows": len(growth_result.to_pandas()),
     "bucket_rows": len(bucket_result.to_pandas()),
+    "prefix_rows": len(prefix.to_pandas()),
+    "range_rows": len(range_result.to_pandas()),
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

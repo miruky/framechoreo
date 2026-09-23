@@ -441,6 +441,112 @@ def main():
             ],
         }
     )
+    prefixes = DataStory.for_analysis()
+    prefix_source = prefixes.table(
+        pd.DataFrame(
+            {
+                "group": ["A"] * 1000,
+                "value": pd.array([*range(500), None, *range(501, 1000)], dtype="Int64"),
+            }
+        )
+    )
+    running = prefix_source.window("running", column="value", op="cumsum", by="group")
+    prefix_checks = []
+    for row in (500, 999):
+        prefix_checks.append(
+            {
+                "reference": {"step": running.step_id, "row": row, "column": "running"},
+                "inputs": [
+                    {
+                        "step": origin.step_id,
+                        "row": origin.row,
+                        "column": origin.column,
+                        "cell": encode_cell(origin.value),
+                    }
+                    for origin in running.explain(row, "running")
+                ],
+                "controls": [
+                    {
+                        "step": origin.step_id,
+                        "row": origin.row,
+                        "column": origin.column,
+                        "cell": encode_cell(origin.value),
+                    }
+                    for origin in running.explain_controls(row, "running")
+                ],
+            }
+        )
+    late_page = running.explain_page(999, "running", offset=997, limit=5)
+    contracts.append(
+        {
+            "data": prefixes.to_dict(result=running),
+            "checks": prefix_checks,
+            "page_checks": [
+                {
+                    "reference": {"step": running.step_id, "row": 999, "column": "running"},
+                    "offset": str(late_page.offset),
+                    "total": str(late_page.total),
+                    "inputs": [
+                        {
+                            "step": origin.step_id,
+                            "row": origin.row,
+                            "column": origin.column,
+                            "cell": encode_cell(origin.value),
+                        }
+                        for origin in late_page.origins
+                    ],
+                }
+            ],
+        }
+    )
+    recent = prefix_source.window(
+        "recent", column="value", op="rolling_sum", by="group", size=800, min_periods=1
+    )
+    recent_page = recent.explain_page(999, "recent", offset=798, limit=5)
+    contracts.append(
+        {
+            "data": prefixes.to_dict(result=recent),
+            "checks": [
+                {
+                    "reference": {"step": recent.step_id, "row": 999, "column": "recent"},
+                    "inputs": [
+                        {
+                            "step": origin.step_id,
+                            "row": origin.row,
+                            "column": origin.column,
+                            "cell": encode_cell(origin.value),
+                        }
+                        for origin in recent.explain(999, "recent")
+                    ],
+                    "controls": [
+                        {
+                            "step": origin.step_id,
+                            "row": origin.row,
+                            "column": origin.column,
+                            "cell": encode_cell(origin.value),
+                        }
+                        for origin in recent.explain_controls(999, "recent")
+                    ],
+                }
+            ],
+            "page_checks": [
+                {
+                    "reference": {"step": recent.step_id, "row": 999, "column": "recent"},
+                    "offset": str(recent_page.offset),
+                    "total": str(recent_page.total),
+                    "inputs": [
+                        {
+                            "step": origin.step_id,
+                            "row": origin.row,
+                            "column": origin.column,
+                            "cell": encode_cell(origin.value),
+                        }
+                        for origin in recent_page.origins
+                    ],
+                }
+            ],
+        }
+    )
     story = DataStory()
     source = story.table(
         pd.DataFrame({"key": ["all"] * 100, "v": pd.Series([pd.NA] * 100, dtype="Int64")})

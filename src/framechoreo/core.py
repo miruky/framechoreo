@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,10 @@ from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 from .profile import profile_frame
 
-VERSION = "1.0.0rc5"
+if TYPE_CHECKING:
+    from .authoring import RecordedGroupBy
+
+VERSION = "1.0.0rc6"
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +168,7 @@ def _keys(value: str | Sequence[str], columns: pd.Index, *, allow_empty: bool = 
 def _copy_index(index: pd.Index) -> pd.Index:
     if isinstance(index, pd.MultiIndex):
         return index.copy(deep=True).set_levels(
-            [_copy_index(level) for level in index.levels], verify_integrity=False
+            cast(Any, [_copy_index(level) for level in index.levels]), verify_integrity=False
         )
     if isinstance(index, pd.CategoricalIndex):
         return pd.CategoricalIndex(_copy_categorical(index.array), name=index.name)
@@ -252,13 +255,14 @@ def _condition(
         fields = [column, *(item[1] for item in bounds if item[1])]
         targets = [df[item[1]] if item[1] else item[2] for item in bounds]
         try:
-            mask = df[column].between(*targets, inclusive="both")
+            lower, upper = targets
+            mask = df[column].between(lower, upper, inclusive="both")
         except (TypeError, ValueError) as exc:
             raise ValueError("Condition bounds cannot be compared") from exc
     else:
         raise ValueError("Unsupported condition operator")
     try:
-        boolean = pd.array(mask, dtype="boolean")
+        boolean = pd.array(cast(Any, mask), dtype="boolean")
     except (TypeError, ValueError) as exc:
         raise ValueError("Condition must produce one boolean per row") from exc
     if len(boolean) != len(df):
@@ -282,6 +286,8 @@ def _evaluate_condition(
             raise ValueError("Condition tree exceeds 32 comparisons")
         if expression.children:
             raise ValueError("An atomic condition cannot have children")
+        if expression.column is None or expression.op is None:
+            raise ValueError("An atomic condition needs a column and operator")
         record, fields, outcomes = _condition(
             df, expression.column, expression.op, expression.value
         )
@@ -305,9 +311,9 @@ def _evaluate_condition(
         if expression.kind == "not"
         else arrays[0] & arrays[1]
         if expression.kind == "all"
-        else arrays[0] | arrays[1]
+        else cast(Any, arrays[0]) | arrays[1]
     )
-    outcomes = ["missing" if pd.isna(x) else "true" if x else "false" for x in result]
+    outcomes = ["missing" if pd.isna(cast(Any, x)) else "true" if x else "false" for x in result]
     return (
         {"kind": expression.kind, "children": [part[0] for part in parts]},
         [field for part in parts for field in part[1]],
@@ -517,8 +523,23 @@ class DataStory:
         self._recorded_cells += cells
         return StoryFrame(self, step.id)
 
-    def table(self, frame: pd.DataFrame, *, name: str | None = None) -> StoryFrame:
-        """Record a detached source table. Index labels are not used as row identity."""
+    def table(
+        self,
+        frame: pd.DataFrame,
+        *,
+        name: str | None = None,
+        include_columns: Sequence[str] | None = None,
+    ) -> StoryFrame:
+        """Capture a detached source; an allowlist removes fields before recording."""
+        if include_columns is not None:
+            if not isinstance(frame, pd.DataFrame):
+                raise TypeError("Expected a pandas DataFrame")
+            if not isinstance(include_columns, Sequence) or isinstance(
+                include_columns, (str, bytes)
+            ):
+                raise ValueError("include_columns must be an ordered sequence of column names")
+            chosen_columns = _keys(include_columns, frame.columns)
+            frame = frame.loc[:, chosen_columns]
         chosen_name = name if name is not None else f"Table {len(self._steps) + 1}"
         return self._add(frame, name=chosen_name, operation="source", label=chosen_name)
 
@@ -545,9 +566,13 @@ class DataStory:
         if sum(len(f._snapshot.frame) for f in frames) > self.max_rows:
             raise CaptureLimitError("Concatenation exceeds max_rows")
         output = pd.concat(
-            [f.to_pandas() for f in frames], join=join, ignore_index=ignore_index, sort=False
+            [f.to_pandas() for f in frames],
+            join=cast(Any, join),
+            ignore_index=ignore_index,
+            sort=False,
         )
-        row_parents, cell_parents = [], []
+        row_parents: list[tuple[_RowRef, ...]] = []
+        cell_parents: list[dict[str, tuple[_CellRef, ...]]] = []
         for f in frames:
             for i in range(len(f._snapshot.frame)):
                 row_parents.append((_RowRef(f.step_id, i),))
@@ -597,6 +622,8 @@ class DataStory:
         if not isinstance(frame, StoryFrame):
             raise ValueError("frame must belong to the same story")
         sid = self._result(frame)
+        if sid is None:
+            raise ValueError("frame must name a recorded step")
         if not isinstance(note, str) or len(note) > 600:
             raise ValueError("note must be a string of at most 600 characters")
         validate_text(note)
@@ -629,9 +656,7 @@ class DataStory:
         return {
             "format": "framechoreo.story",
             "schema_version": (
-                2
-                if any(step.parameters.get("lineage_encoding") == "shared_group" for step in steps)
-                else 1
+                2 if any("lineage_encoding" in step.parameters for step in steps) else 1
             ),
             "library_version": VERSION,
             "pandas_version": pd.__version__,
@@ -641,6 +666,30 @@ class DataStory:
             "result": result_id,
             "timeline": timeline,
         }, steps
+
+    def _check_source_approval(
+        self,
+        result: StoryFrame | None,
+        approved_source_columns: Mapping[str, Sequence[str]] | None,
+    ) -> None:
+        if approved_source_columns is None:
+            return
+        if not isinstance(approved_source_columns, Mapping):
+            raise ValueError("approved_source_columns must map source step IDs to column lists")
+        _, steps = self._export_plan(result)
+        sources = {
+            step.id: tuple(step.frame.columns) for step in steps if step.operation == "source"
+        }
+        if set(approved_source_columns) != set(sources):
+            raise ValueError("Approve every exported source by its step ID")
+        for step_id, actual in sources.items():
+            approved = approved_source_columns[step_id]
+            if (
+                not isinstance(approved, Sequence)
+                or isinstance(approved, (str, bytes))
+                or tuple(approved) != actual
+            ):
+                raise ValueError("Approved columns must exactly match the exported source")
 
     @staticmethod
     def _step_header(step: _Step, presentation: dict[str, Any]) -> dict[str, Any]:
@@ -663,7 +712,8 @@ class DataStory:
         cell_refs = step.cell_parents[i] if step.cell_parents else {}
         shared_name = (
             step.parameters["name"]
-            if step.parameters.get("lineage_encoding") == "shared_group"
+            if step.parameters.get("lineage_encoding")
+            in ("shared_group", "window_prefix", "window_range")
             else None
         )
         record = {
@@ -709,8 +759,14 @@ class DataStory:
         payload["steps"] = records
         return payload
 
-    def to_json(self, *, result: StoryFrame | None = None) -> str:
+    def to_json(
+        self,
+        *,
+        result: StoryFrame | None = None,
+        approved_source_columns: Mapping[str, Sequence[str]] | None = None,
+    ) -> str:
         """Encode one row at a time, without materializing a second complete story."""
+        self._check_source_approval(result, approved_source_columns)
         payload, steps = self._export_plan(result)
         stream = io.StringIO()
         size = 0
@@ -754,7 +810,12 @@ class DataStory:
         return stream.getvalue()
 
     def to_html(
-        self, *, result: StoryFrame | None = None, theme: str = "auto", compression: str = "auto"
+        self,
+        *,
+        result: StoryFrame | None = None,
+        theme: str = "auto",
+        compression: str = "auto",
+        approved_source_columns: Mapping[str, Sequence[str]] | None = None,
     ) -> str:
         """Return a self-contained player with no external assets or network requests."""
         from .export import render_html
@@ -762,7 +823,7 @@ class DataStory:
         if self._result(result) is None:
             raise ValueError("Add a table before exporting HTML")
         return render_html(
-            self.to_json(result=result),
+            self.to_json(result=result, approved_source_columns=approved_source_columns),
             self.title,
             theme,
             compression=compression,
@@ -777,13 +838,19 @@ class DataStory:
         theme: str = "auto",
         overwrite: bool = False,
         compression: str = "auto",
+        approved_source_columns: Mapping[str, Sequence[str]] | None = None,
     ) -> Path:
         """Write HTML atomically; refuse to replace an existing file by default."""
         from .export import write_html
 
         return write_html(
             path,
-            self.to_html(result=result, theme=theme, compression=compression),
+            self.to_html(
+                result=result,
+                theme=theme,
+                compression=compression,
+                approved_source_columns=approved_source_columns,
+            ),
             overwrite=overwrite,
         )
 
@@ -797,6 +864,16 @@ class DataStory:
             "cells_across_snapshots": sum(len(s.frame) * len(s.frame.columns) for s in steps),
             "json_bytes": len(text.encode("utf-8")),
             "source_tables": [s.name for s in steps if s.operation == "source"],
+            "sources": [
+                {
+                    "step_id": step.id,
+                    "name": step.name,
+                    "rows": len(step.frame),
+                    "columns": list(step.frame.columns),
+                }
+                for step in steps
+                if step.operation == "source"
+            ],
             "includes_filtered_out_rows": True,
         }
 
@@ -833,6 +910,35 @@ class StoryFrame:
     def profile(self) -> dict[str, Any]:
         """Return a detached summary of dtypes, missingness, uniqueness and duplicate rows."""
         return profile_frame(self._snapshot.frame)
+
+    def dropna(
+        self,
+        *,
+        subset: str | Sequence[str] | None = None,
+        how: str = "any",
+        label: str = "Remove missing rows",
+    ) -> StoryFrame:
+        """Pandas-style spelling for the recorded ``drop_missing`` operation."""
+        return self.drop_missing(subset=subset, how=how, label=label)
+
+    def fillna(self, value: Mapping[str, Any], *, label: str = "Fill missing values") -> StoryFrame:
+        """Pandas-style spelling for explicit per-column constant fills."""
+        return self.fill_missing(value, label=label)
+
+    def rename(self, *, columns: Mapping[str, str], label: str = "Rename columns") -> StoryFrame:
+        """Pandas-style column rename with recorded positional value inputs."""
+        return self.rename_columns(columns, label=label)
+
+    def groupby(
+        self, by: str | Sequence[str], *, dropna: bool, sort: bool = False
+    ) -> RecordedGroupBy:
+        """Offer checked pandas-style grouped methods for the supported reducers."""
+        from .authoring import RecordedGroupBy
+
+        keys = _keys(by, self._snapshot.frame.columns)
+        if not isinstance(dropna, bool) or not isinstance(sort, bool):
+            raise ValueError("dropna and sort must be booleans")
+        return RecordedGroupBy(self, tuple(keys), dropna, sort)
 
     def _record_rows(
         self,
@@ -885,11 +991,18 @@ class StoryFrame:
             ascending = list(ascending)
         if na_position not in ("first", "last"):
             raise ValueError("na_position must be 'first' or 'last'")
-        output = df.sort_values(keys, ascending=ascending, na_position=na_position, kind="stable")
+        output = df.sort_values(
+            keys, ascending=cast(Any, ascending), na_position=cast(Any, na_position), kind="stable"
+        )
         positions = (
             df[keys]
             .reset_index(drop=True)
-            .sort_values(keys, ascending=ascending, na_position=na_position, kind="stable")
+            .sort_values(
+                keys,
+                ascending=cast(Any, ascending),
+                na_position=cast(Any, na_position),
+                kind="stable",
+            )
             .index.tolist()
         )
         return self._record_rows(
@@ -1088,7 +1201,7 @@ class StoryFrame:
         if not isinstance(errors, str) or errors not in ("raise", "coerce"):
             raise ValueError("errors must be raise or coerce")
         for c in chosen:
-            df[c] = pd.to_numeric(df[c], errors=errors)
+            df[c] = pd.to_numeric(df[c], errors=cast(Any, errors))
         return self._record_rows(
             df,
             operation="to_numeric",
@@ -1118,7 +1231,7 @@ class StoryFrame:
         ):
             raise ValueError("errors must be raise/coerce and utc must be a boolean")
         for c in chosen:
-            df[c] = pd.to_datetime(df[c], format=format, errors=errors, utc=utc)
+            df[c] = pd.to_datetime(df[c], format=format, errors=cast(Any, errors), utc=utc)
         return self._record_rows(
             df,
             operation="to_datetime",
@@ -1242,7 +1355,9 @@ class StoryFrame:
             for j, name in enumerate(wide.columns):
                 position = positions.iat[i, j]
                 refs[name] = (
-                    () if pd.isna(position) else (_CellRef(self.step_id, int(position), values),)
+                    ()
+                    if pd.isna(position)
+                    else (_CellRef(self.step_id, int(cast(Any, position)), values),)
                 )
             cell_parents.append(refs)
         return self._story._add(
@@ -1384,6 +1499,8 @@ class StoryFrame:
         if not isinstance(op, str) or op not in operations:
             raise ValueError("op must be add, subtract, multiply, or divide")
         inputs = _keys([left], df.columns)
+        operand: Any
+        right_record: dict[str, Any]
         if isinstance(right, str):
             _keys([right], df.columns)
             inputs.append(right)
@@ -1402,7 +1519,7 @@ class StoryFrame:
             ):
                 raise UnsupportedDataError("calculate requires numeric, non-boolean operands")
         df[name] = operations[op](df[left], operand)
-        columns = {c: (c,) for c in self._snapshot.frame.columns}
+        columns: dict[str, tuple[str, ...]] = {c: (c,) for c in self._snapshot.frame.columns}
         columns[name] = tuple(inputs)
         return self._record_rows(
             df,
@@ -1509,9 +1626,9 @@ class StoryFrame:
             raise ValueError("cases must contain 1 through 16 branches")
         branches = list(cases)
         counter = [0]
-        records = []
-        condition_fields = []
-        branch_values = []
+        records: list[dict[str, Any]] = []
+        condition_fields: list[str] = []
+        branch_values: list[tuple[str | None, Any]] = []
         for branch in branches:
             if not isinstance(branch, (tuple, list)) or len(branch) != 2:
                 raise ValueError("Each case must be (Condition, value)")
@@ -1690,8 +1807,8 @@ class StoryFrame:
         """Record lag, difference, fractional change, or cumulative/rolling statistics.
 
         The input order is the current row order; call ``sort_values`` first for
-        chronological work. Explicit per-cell references are limited so an
-        expanding window cannot silently produce an enormous export.
+        chronological work. Large cumulative and rolling windows use compact
+        membership instead of repeating every candidate in every output row.
         """
         df = self.to_pandas()
         if not isinstance(name, str) or not name.strip() or name in df.columns:
@@ -1742,12 +1859,48 @@ class StoryFrame:
         for position, group_id in enumerate(ids):
             groups_by_id.setdefault(int(group_id), []).append(position)
         groups = list(groups_by_id.values())
+        row_groups = [0] * len(df)
+        row_offsets = [0] * len(df)
+        compact_encoding: str | None = None
+        if op in ("cumsum", "cummin", "cummax"):
+            would_be_refs = 0
+            for group_index, positions in enumerate(groups):
+                present_count = 0
+                for offset, position in enumerate(positions):
+                    row_groups[position] = group_index
+                    row_offsets[position] = offset
+                    if pd.notna(df[column].array[position]):
+                        present_count += 1
+                        would_be_refs += present_count * (1 + len(keys))
+                    else:
+                        would_be_refs += len(keys) + 1
+            if would_be_refs > 250_000:
+                compact_encoding = "window_prefix"
+        elif op.startswith("rolling_"):
+            would_be_refs = 0
+            for group_index, positions in enumerate(groups):
+                present_count = 0
+                for offset, position in enumerate(positions):
+                    row_groups[position] = group_index
+                    row_offsets[position] = offset
+                    present_count += int(pd.notna(df[column].array[position]))
+                    if offset >= size:
+                        present_count -= int(pd.notna(df[column].array[positions[offset - size]]))
+                    window_len = min(offset + 1, size)
+                    missing_count = window_len - present_count
+                    would_be_refs += (
+                        present_count
+                        + (present_count + int(pd.isna(df[column].array[position]))) * len(keys)
+                        + missing_count
+                    )
+            if would_be_refs > 250_000:
+                compact_encoding = "window_range"
         chunks = []
         inputs: list[tuple[_CellRef, ...]] = [()] * len(df)
         controls: list[tuple[_CellRef, ...]] = [()] * len(df)
         references = 0
         for positions in groups:
-            series = df[column].iloc[positions].reset_index(drop=True)
+            series = df[column].iloc[cast(Any, positions)].reset_index(drop=True)
             if op == "lag":
                 # GroupBy.shift preserves pandas' boundary-missing scalar for
                 # object and extension dtypes; per-group concat can change it.
@@ -1765,6 +1918,8 @@ class StoryFrame:
                 calculated.index = positions
                 chunks.append(calculated)
             for j, position in enumerate(positions):
+                if compact_encoding is not None:
+                    continue
                 window_positions = positions[max(0, j - size + 1) : j + 1]
                 if op == "lag":
                     members = [positions[j - periods]] if j >= periods else []
@@ -1828,6 +1983,15 @@ class StoryFrame:
                 "size": size,
                 "min_periods": minimum,
                 "groups": groups,
+                **(
+                    {
+                        "lineage_encoding": compact_encoding,
+                        "row_groups": row_groups,
+                        "row_offsets": row_offsets,
+                    }
+                    if compact_encoding is not None
+                    else {}
+                ),
             },
         )
 
@@ -1877,11 +2041,11 @@ class StoryFrame:
         calculated = (
             values.transform(lambda s: s.sum(min_count=minimum))
             if op == "sum"
-            else values.transform(op)
+            else values.transform(cast(Any, op))
         )
         ids = grouped.ngroup().to_numpy()
         groups_by_id: dict[int, list[int]] = {}
-        excluded = []
+        excluded: list[int] = []
         for position, group_id in enumerate(ids):
             if pd.isna(group_id):
                 excluded.append(position)
@@ -1965,10 +2129,14 @@ class StoryFrame:
             raise UnsupportedDataError("rank_within requires numeric, non-boolean values")
         if keys:
             grouped = df.groupby(keys, sort=False, dropna=False, observed=True)
-            calculated = grouped[value].rank(method=method, ascending=ascending, na_option="keep")
+            calculated = grouped[value].rank(
+                method=cast(Any, method), ascending=ascending, na_option="keep"
+            )
             ids = grouped.ngroup().to_numpy()
         else:
-            calculated = df[value].rank(method=method, ascending=ascending, na_option="keep")
+            calculated = df[value].rank(
+                method=cast(Any, method), ascending=ascending, na_option="keep"
+            )
             ids = np.zeros(len(df), dtype=int)
         groups_by_id: dict[int, list[int]] = {}
         for position, group_id in enumerate(ids):
@@ -2118,17 +2286,18 @@ class StoryFrame:
         left_map, right_map = left_df[left_keys].copy(), right_df[right_keys].copy()
         left_map[left_marker] = np.arange(len(left_map))
         right_map[right_marker] = np.arange(len(right_map))
-        mapping = left_map.merge(right_map, **options)
+        mapping = left_map.merge(right_map, **cast(Any, options))
         if len(mapping) > self._story.max_rows:
             raise CaptureLimitError("Join result exceeds max_rows")
-        output = left_df.merge(right_df, **options)
+        output = left_df.merge(right_df, **cast(Any, options))
         if len(mapping) != len(output):
             raise UnsupportedDataError("Could not align the join result with its source rows")
         common = {
             left for left, right_key in zip(left_keys, right_keys, strict=True) if left == right_key
         }
         overlap = (set(left_df.columns) & set(right_df.columns)) - common
-        row_parents, cell_parents = [], []
+        row_parents: list[tuple[_RowRef, ...]] = []
+        cell_parents: list[dict[str, tuple[_CellRef, ...]]] = []
         no_left = no_right = 0
         left_match_counts = [0] * len(left_df)
         right_match_counts = [0] * len(right_df)
@@ -2149,7 +2318,7 @@ class StoryFrame:
             if ri is not None:
                 refs.append(_RowRef(right.step_id, ri))
             row_parents.append(tuple(refs))
-            cells = {}
+            cells: dict[str, tuple[_CellRef, ...]] = {}
             for c in left_df.columns:
                 out = c + suffixes[0] if c in overlap else c
                 if li is not None:
@@ -2276,8 +2445,8 @@ class StoryFrame:
                 parents.append(_RowRef(right.step_id, ri))
                 right_usage[ri] += 1
             row_parents.append(tuple(parents))
-            cells = {}
-            controls = {}
+            cells: dict[str, tuple[_CellRef, ...]] = {}
+            controls: dict[str, tuple[_CellRef, ...]] = {}
             match_keys = tuple(
                 [_CellRef(self.step_id, li, c) for c in matching_keys]
                 + (
@@ -2410,7 +2579,9 @@ class StoryFrame:
         cell_controls = []
         for positions in groups:
             part = df.iloc[positions]
-            resampler = part.resample(rule, on=on, closed=closed, label=bin_label, origin=origin)
+            resampler = part.resample(
+                rule, on=on, closed=cast(Any, closed), label=cast(Any, bin_label), origin=origin
+            )
             selected = resampler[value]
             calculated = selected.sum(min_count=1) if op == "sum" else getattr(selected, op)()
             output_part = calculated.reset_index()
@@ -2651,7 +2822,83 @@ class StoryFrame:
             },
         )
 
-    def _lineage_counts(self, row: int, column: str, cap: int | None = None):
+    @staticmethod
+    def _compact_window_members(step: _Step, row: int) -> list[int]:
+        p = step.parameters
+        members = p["groups"][p["row_groups"][row]]
+        offset = p["row_offsets"][row]
+        return (
+            members[max(0, offset - p["size"] + 1) : offset + 1]
+            if p["lineage_encoding"] == "window_range"
+            else members[: offset + 1]
+        )
+
+    def _value_refs(self, ref: _CellRef) -> tuple[_CellRef, ...]:
+        step = self._story._step(ref.step)
+        p = step.parameters
+        if (
+            step.operation == "window"
+            and p.get("lineage_encoding") in ("window_prefix", "window_range")
+            and ref.column == p["name"]
+        ):
+            parent = self._story._step(step.parents[0])
+            values = parent.frame[p["column"]].array
+            if p["lineage_encoding"] == "window_prefix" and pd.isna(values[ref.row]):
+                return ()
+            return tuple(
+                _CellRef(parent.id, position, p["column"])
+                for position in self._compact_window_members(step, ref.row)
+                if pd.notna(values[position])
+            )
+        return step.cell_parents[ref.row].get(ref.column, ())
+
+    def _control_refs(self, step: _Step, row: int, column: str) -> tuple[_CellRef, ...]:
+        p = step.parameters
+        if (
+            step.operation == "window"
+            and p.get("lineage_encoding") in ("window_prefix", "window_range")
+            and column == p["name"]
+        ):
+            parent = self._story._step(step.parents[0])
+            values = parent.frame[p["column"]].array
+            if p["lineage_encoding"] == "window_prefix" and pd.isna(values[row]):
+                return tuple(_CellRef(parent.id, row, key) for key in p["by"]) + (
+                    _CellRef(parent.id, row, p["column"]),
+                )
+            members = self._compact_window_members(step, row)
+            candidates = [position for position in members if pd.notna(values[position])]
+            key_positions = (
+                dict.fromkeys([*candidates, row])
+                if p["lineage_encoding"] == "window_range"
+                else candidates
+            )
+            return tuple(
+                [
+                    _CellRef(parent.id, position, key)
+                    for position in key_positions
+                    for key in p["by"]
+                ]
+                + (
+                    [
+                        _CellRef(parent.id, position, p["column"])
+                        for position in members
+                        if pd.isna(values[position])
+                    ]
+                    if p["lineage_encoding"] == "window_range"
+                    else []
+                )
+            )
+        return (
+            step.cell_controls[row].get(column, ())
+            if step.cell_controls
+            else step.row_controls[row]
+            if step.row_controls
+            else ()
+        )
+
+    def _lineage_counts(
+        self, row: int, column: str, cap: int | None = None
+    ) -> tuple[_CellRef, dict[_CellRef, int]]:
         if (
             isinstance(row, bool)
             or not isinstance(row, int)
@@ -2671,7 +2918,7 @@ class StoryFrame:
             if step.operation == "source":
                 counts[ref] = 1
                 continue
-            parents = step.cell_parents[ref.row].get(ref.column, ())
+            parents = self._value_refs(ref)
             if expanded:
                 count = sum(counts[parent] for parent in parents)
                 counts[ref] = min(cap, count) if cap is not None else count
@@ -2680,9 +2927,11 @@ class StoryFrame:
                 work.extend((parent, False) for parent in parents if parent not in counts)
         return reference, counts
 
-    def _origin_slice(self, reference, counts, offset: int, limit: int) -> tuple[CellOrigin, ...]:
+    def _origin_slice(
+        self, reference: _CellRef, counts: dict[_CellRef, int], offset: int, limit: int
+    ) -> tuple[CellOrigin, ...]:
         pending = [reference]
-        origins = []
+        origins: list[CellOrigin] = []
         while pending and len(origins) < limit:
             ref = pending.pop()
             if counts[ref] <= offset:
@@ -2696,11 +2945,11 @@ class StoryFrame:
                         step.id,
                         ref.row,
                         ref.column,
-                        step.frame.iat[ref.row, step.frame.columns.get_loc(ref.column)],
+                        step.frame.iat[ref.row, cast(int, step.frame.columns.get_loc(ref.column))],
                     )
                 )
             else:
-                pending.extend(reversed(step.cell_parents[ref.row].get(ref.column, ())))
+                pending.extend(reversed(self._value_refs(ref)))
         return tuple(origins)
 
     def explain(
@@ -2729,13 +2978,7 @@ class StoryFrame:
             raise IndexError("row is an output row position")
         if column not in step.frame.columns:
             raise KeyError(column)
-        refs = (
-            step.cell_controls[row].get(column, ())
-            if step.cell_controls
-            else step.row_controls[row]
-            if step.row_controls
-            else ()
-        )
+        refs = self._control_refs(step, row, column)
         origins: list[CellOrigin] = []
         for ref in refs:
             source = StoryFrame(self._story, ref.step)

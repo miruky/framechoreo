@@ -2,8 +2,9 @@
 
 ## Supported version
 
-Security fixes target the current 0.1.x line. This is an early release with a
-limited supported operation surface.
+Security fixes target the latest 1.0 release candidate while the project remains
+unpublished. The current local candidate is `1.0.0rc6`; no public support window
+is promised until a release is published.
 
 ## Data handling
 
@@ -11,6 +12,10 @@ Exported HTML contains recorded ancestor tables, including rows that were filter
 out. It is not an anonymization mechanism. Prepare or synthesize data before
 sharing. A source index is not displayed automatically, but ordinary data columns
 and captured values are included.
+Use `table(..., include_columns=[...])` to exclude fields before capture. Review
+`export_info()["sources"]` and pass `approved_source_columns` to an export to
+reject a changed or unreviewed source schema. Approval checks column names, not
+whether values in an approved column contain sensitive information.
 
 The HTML player has no network dependencies and does not execute Python. Data is
 escaped when embedded and displayed using text APIs. A Content Security Policy

@@ -99,7 +99,7 @@ function mount(data = fixture(), options = {}) {
       ? require("node:zlib").gzipSync(serialized).toString("base64")
       : serialized.replaceAll("<", "\\u003c");
   const dom = new JSDOM(
-    '<!doctype html><main id="framechoreo-player"></main><script id="framechoreo-data" type="application/json"' +
+    '<!doctype html><head><title>FrameChoreo test</title></head><main id="framechoreo-player"></main><script id="framechoreo-data" type="application/json"' +
       (options.compressed
         ? ' data-encoding="gzip-base64" data-json-bytes="' +
           (Buffer.byteLength(serialized) + (options.sizeOffset || 0)) +
@@ -230,7 +230,7 @@ function mount(data = fixture(), options = {}) {
   window.fetch = () => {
     throw new Error("Player must not use the network");
   };
-  for (const file of ["model.js", "workbench.js", "player.js"])
+  for (const file of ["model.js", "charts.js", "workbench.js", "player.js"])
     window.eval(fs.readFileSync(path.join(__dirname, "../src/framechoreo/assets", file), "utf8"));
   const tick = (ms) => {
     const until = now + ms;

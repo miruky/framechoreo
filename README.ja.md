@@ -12,7 +12,7 @@
 
 ## インストール
 
-1.0.0rc5のローカル候補版です。まだ公開していません。
+1.0.0rc6のローカル候補版です。まだ公開していません。
 Python 3.11以上で、ソースのルートから実行します。
 
 ```sh
@@ -23,7 +23,7 @@ python examples/sales_story.py
 配布用wheelから入れる場合は次のとおりです。
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc5-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc6-py3-none-any.whl
 ```
 
 同じ版番号の未公開wheelを以前に導入している場合は、上のコマンドに
@@ -68,6 +68,8 @@ python -m pip install dist/framechoreo-1.0.0rc5-py3-none-any.whl
 `merge_asof()`は時刻などの昇順キーで、前・後・最も近い右行を選びます。
 `asof_audit()`で選ばれなかった行や再利用された右行を確認できます。
 `rank_within()`は同順位の方式を選び、グループ内順位の候補をたどれます。
+`dropna()`・`fillna()`・`rename()`と、対応した集計に限る`groupby()`も使えます。
+既存のpandasの書き方に近づけつつ、未対応操作の入力元を推測して記録しません。
 大きなグループでは`group_transform()`と`rank_within()`の候補を共有して記録します。
 各行で同じ入力元を複製しないため、5万行の一つのグループでも値の出所をページで確認できます。
 `resample_time()`は時刻を固定幅の枠へ集計し、空の時間枠も残します。
@@ -90,8 +92,8 @@ python examples/growth_workflow.py
 python examples/time_buckets_workflow.py
 ```
 
-累計では説明用の入力参照が急増するため、窓計算の1工程で25万参照を超える場合は
-`CaptureLimitError` を出します。値や参照を黙って省略しません。
+大きな累積・移動窓は対象行を共有して記録します。元の値を黙って省略せず、
+`explain_page()`で末尾の入力まで確認できます。
 
 一時停止は行の動きと再生時間を止め、再開・速度変更でも途中の位置を保ちます。
 元の入力が多い場合は50件ずつページを送り、すべて確認できます。
@@ -131,11 +133,25 @@ story.export_html("story.html", result=total, overwrite=True)
 ```sh
 python examples/large_analysis.py --rows 50000
 python examples/large_group_workflow.py --rows 50000
+python examples/large_window_workflow.py --rows 50000
 ```
 
 `examples/generated/analysis.html`に、5万件の売上計算から地域別ランキングまでの
 説明を生成します。詳しい使い方は[分析と規模のガイド](docs/analysis.md)にあります。
 大きなHTMLは自動で圧縮されます。対応ブラウザーでローカルに展開され、再生時の通信は不要です。
+
+## 共有前に確認する
+
+結果で非表示になった列や抽出で除外された行も、元表としてHTMLに含まれます。
+`story.table(df, include_columns=[...])`で必要な列だけを取り込み、
+`story.export_info()["sources"]`で実際に含まれる元表・列を確認してください。
+`export_html(..., approved_source_columns={元表のstep_id: 列名のリスト})`を指定すると、
+承認していない列や元表が追加されていた場合に書き出しを止めます。
+承認した列の値が安全かどうかは人が確認する必要があります。
+
+グラフは棒・折れ線・散布図から選べます。点を選ぶと、その値の入力元へ移動できます。
+画面は使いやすさの検証途中で、外部の読者による確認手順は
+[読者評価プロトコル](docs/reader-evaluation.md)に記載しています。
 非圧縮で出す場合は`compression="none"`を指定します。
 
 記録した表と展開後のデータはメモリに置きます。数百万行の分散処理や、メモリに収まらない

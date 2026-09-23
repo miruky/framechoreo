@@ -151,8 +151,14 @@ Chromium, including input number 50,000. This describes that example only;
 the browser still parses all captured rows and a selected large group still
 needs time and memory to enumerate its distinct candidates.
 
-The cumulative `window` operations continue to have the 250,000-reference
-limit. Their expanding prefixes are not encoded as shared group candidates.
+Large `window` steps now encode cumulative prefixes and fixed rolling ranges
+from recorded group membership when explicit references would exceed 250,000.
+Run `python examples/large_window_workflow.py --rows 50000` to produce a
+synthetic cumulative story whose final value has 50,000 exact ordered sources.
+Its HTML was about 3.6 MB locally. Python and the player reconstruct only the
+selected result's members when paging; each selection still uses time and
+memory proportional to the distinct members it reaches. This is not a claim
+that every operation supports 50,000 rows or disk-backed execution.
 
 `explain()` keeps its complete-list behavior and default 10,000-input guard.
 `explain_page(row, column, offset=0, limit=50)` returns an immutable `OriginPage`:
@@ -188,9 +194,12 @@ The Python export uses the standard library's [gzip implementation](https://docs
 
 ## Data disclosure and practical limits
 
-Filtering, choosing fewer columns, paging, and compression do not redact the ancestor
-tables. Remove data that must not be shared before calling `story.table()`.
-All columns and rows of the recorded ancestor tables are included.
+Filtering, selecting fewer output columns, paging, and compression do not redact the
+ancestor tables. Remove data that must not be shared before calling `story.table()`,
+or use its `include_columns` allowlist to exclude fields at capture time. All rows
+and retained columns of the recorded ancestor tables are included. Before sharing,
+review `export_info()["sources"]` and pass `approved_source_columns` to reject a
+source schema that changed after review; that approval does not inspect values.
 
 The 50,000-order example was checked locally against pandas and in Chromium. Its
 eight-row report has 10,946 raw value inputs behind the first total, counting quantities

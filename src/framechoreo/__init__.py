@@ -1,5 +1,6 @@
 """Portable animations for explicit pandas transformations."""
 
+from .authoring import RecordedGroupBy, RecordedSeriesGroupBy
 from .core import (
     VERSION,
     CellOrigin,
@@ -22,6 +23,8 @@ __all__ = [
     "DataStory",
     "FrameChoreoError",
     "OriginPage",
+    "RecordedGroupBy",
+    "RecordedSeriesGroupBy",
     "StoryFrame",
     "col",
     "where",

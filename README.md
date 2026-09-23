@@ -12,7 +12,7 @@ is needed to replay it.
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
-result was made. **1.0.0rc5 is a local release candidate; it has not been published.**
+result was made. **1.0.0rc6 is a local release candidate; it has not been published.**
 Operations are explicit; pandas computes their table and numeric results. [The 1.0 guide](docs/v1.md)
 defines the supported workflow, reader features, and compatibility boundaries.
 
@@ -28,7 +28,7 @@ python -m pip install .
 Or install the prepared wheel:
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc5-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc6-py3-none-any.whl
 ```
 
 If you installed an earlier unreleased wheel with the same version, add
@@ -98,6 +98,7 @@ iframe through `_repr_html_()`.
 | Operation | Contract |
 |---|---|
 | `table(df)` | Copies a source DataFrame; supports unique, nonempty string column names and scalar cells |
+| `table(df, include_columns=[...])` | Captures only approved fields; excluded fields never enter the story |
 | `filter_rows(predicate)` | Evaluates a callable once on a copy, or accepts a boolean mask; rejects input mutation and ambiguous Series alignment |
 | `filter_by(column, op=..., value=...)` | Explicit condition with true/false/missing outcomes for every input row and an excluded-row audit |
 | `where(...)` with `&`, `\|`, `~` | Compose up to 32 comparisons with pandas three-valued logic; supports membership and inclusive ranges |
@@ -105,6 +106,7 @@ iframe through `_repr_html_()`.
 | `case_select(name, cases=[...], otherwise=...)` | Checks ordered rules and uses the first true branch; a missing check continues to the next branch |
 | `coalesce(name, [...], default=...)` | Takes the first non-missing field in each row and shows every checked candidate |
 | `window(name, column=..., op=..., by=...)` | Grouped lag/difference/fractional change, cumulative sum/min/max, and rolling sum/mean/min/max in current row order |
+| `dropna` / `fillna` / `rename` / `groupby(...).agg(...)` | Familiar pandas-style spelling for supported recorded operations; unsupported pandas behavior is not guessed |
 | `merge(...)` / `join_audit()` | Left/inner/right/outer with validated cardinality; inspect unmatched inputs, fanout, duplicate keys, and missing-key matches |
 | `merge_asof(...)` / `asof_audit()` | Sorted nearby-key join with backward/forward/nearest choices, tolerance, exact-match policy, and selected-right-row audit |
 | `resample_time(on=..., value=..., rule=..., by=...)` | Fixed-width time buckets with explicit boundary/label policy, native pandas aggregations, and visible empty intervals |
@@ -128,7 +130,7 @@ iframe through `_repr_html_()`.
 | `explain(row, column)` | Returns source value inputs, preserving repeated use of the same source cell |
 | `explain_controls(row, column)` / `filter_decision(input_row)` / `condition_breakdown(input_row)` | Separates decision inputs, the final outcome, and each comparison's outcome |
 | `explain_page(row, column, offset=..., limit=...)` | Bounded pages with exact totals, including repeated use of an aggregate |
-| `to_html` / `export_html` | Self-contained player; light, dark, or automatic theme |
+| `to_html` / `export_html` | Self-contained player; optional source-column approval for reviewed sharing |
 
 The default limits are **200 rows per step, 12 columns, 20 steps, and 2 MB of
 serialized story data**. These are capture guards, not a benchmark. Limits raise
@@ -146,9 +148,9 @@ retained; equal short decimal text can still hide different floating-point value
 Conditional, fallback, and window steps show decision inputs separately from the
 cells that supplied the result value. An explicit filter lists removed rows as
 false or missing comparisons and opens the original row. These features are
-illustrated by `python examples/decision_window_workflow.py`. A long cumulative
-calculation can exceed the separate 250,000-reference provenance cap and raises
-instead of exporting a partial explanation.
+illustrated by `python examples/decision_window_workflow.py`. Large cumulative
+and rolling windows share their exact member references instead of repeating
+them in every recorded row.
 Large `group_transform` and `rank_within` steps use shared group references in
 schema version 2, retaining exact source pages without duplicating every group
 candidate in each output row. The player still reads older schema version 1 files.
@@ -178,6 +180,24 @@ Run `python examples/large_group_workflow.py --rows 50000` to broadcast and rank
 a 50,000-row group with exact, paged value origins. For time-series analysis,
 `examples/growth_workflow.py` and `examples/time_buckets_workflow.py` show
 fractional change and fixed-width bucket membership.
+Run `python examples/large_window_workflow.py --rows 50000` for a cumulative
+window whose last result has 50,000 ordered value inputs.
+
+## Review data before sharing
+
+Every exported ancestor source table includes rows later filtered out. Capture
+only the fields you intend to share, then approve the exact source schema:
+
+```python
+source = story.table(df, name="Orders", include_columns=["product", "amount"])
+manifest = story.export_info(result=source)
+approved = {item["step_id"]: item["columns"] for item in manifest["sources"]}
+story.export_html("orders.html", result=source, approved_source_columns=approved)
+```
+
+This approval catches unreviewed columns or added sources; it does not inspect
+the values inside an approved column. See [the release guide](docs/release.md)
+and [reader evaluation protocol](docs/reader-evaluation.md).
 See [analysis and scale](docs/analysis.md) for the API, measurements, and memory limits.
 
 ## What the file contains

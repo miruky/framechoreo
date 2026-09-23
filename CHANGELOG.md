@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0rc6 — Unpublished candidate
+
+- Add source-column capture allowlists, source manifests, and an exact source-column approval gate for reviewed JSON/HTML exports.
+- Add pandas-style cleaning and grouped authoring methods backed by existing explicit operations; unsupported pandas behavior still raises rather than inventing provenance.
+- Add provenance-linked, group-labeled line and scatter plots with separate unplotted-value inspection and safe plotting of extreme finite values; extract chart rendering into its own player module.
+- Add compact exact lineage for large cumulative and fixed rolling windows, including late-page and missing-member verification across Python and JavaScript.
+- Add mypy checks, dependency audits, and automated DOM accessibility checks; correct a mislabeled ARIA group, update the security support notice, and provide an independent-reader evaluation protocol.
+
 ## 1.0.0rc5 — Unpublished candidate
 
 - Share candidate references for large `group_transform` and `rank_within` steps in display schema version 2, retaining exact value and decision origins without quadratic JSON growth. The player still reads schema version 1 stories.
