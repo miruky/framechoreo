@@ -1,5 +1,7 @@
 # FrameChoreo
 
+[![checks](https://github.com/miruky/framechoreo/actions/workflows/ci.yml/badge.svg)](https://github.com/miruky/framechoreo/actions/workflows/ci.yml)
+
 **Explain pandas workflows with interactive tables, charts, and separate value and decision provenance.**
 
 Record cleaning, conversions, joins, reshaping, and grouped metrics. Readers can
@@ -11,11 +13,10 @@ is needed to replay it.
 
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
-**See the result before installing:** [download the standalone demo](docs/index.html)
-and open the HTML file in a browser. Select **Add the sales in each category**, then
-select the Books total `270`: its source rows contain `120` and `150`. The demo uses
-synthetic data and needs no server. On GitHub, download the raw HTML rather than
-viewing its source.
+**See the result before installing:** [open the live demo](https://miruky.github.io/framechoreo/).
+Select **Add the sales in each category**, then select the Books total `270`: its
+source rows contain `120` and `150`. The demo uses synthetic data. You can also
+download the [self-contained HTML](docs/index.html) for offline viewing.
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
 result was made. **1.0.0rc6 is a GitHub preview, not a stable 1.0 release or a PyPI package.**

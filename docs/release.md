@@ -7,8 +7,8 @@ successful local build does not mean a PyPI project exists.
 2. Run Python tests on both supported pandas lines, player-model tests, and lint.
 3. Generate examples and `docs/index.html` with `python examples/build_public_demo.py`;
    inspect the player in a browser, including a narrow view. The standalone demo
-   contains synthetic data and can become the GitHub Pages entry point after
-   Pages is explicitly enabled for the repository's `/docs` folder.
+   contains synthetic data and is the GitHub Pages entry point from `/docs`;
+   `.nojekyll` leaves its generated HTML unchanged.
    Run the DOM accessibility check and inspect focus, contrast, and a screen
    reader in real browsers; the automated check alone is incomplete.
 4. Build wheel and sdist, run `twine check`, and install the wheel outside the checkout.

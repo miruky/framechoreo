@@ -159,6 +159,7 @@ def main() -> None:
             "examples/large_window_workflow.py",
             "docs/v1.md",
             "docs/index.html",
+            "docs/.nojekyll",
             "docs/analysis.md",
             "docs/api.md",
             "docs/reader-evaluation.md",

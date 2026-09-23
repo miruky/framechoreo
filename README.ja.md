@@ -1,15 +1,17 @@
 # FrameChoreo
 
+[![checks](https://github.com/miruky/framechoreo/actions/workflows/ci.yml/badge.svg)](https://github.com/miruky/framechoreo/actions/workflows/ci.yml)
+
 **pandasの加工過程を、値の入力元と判定理由までたどれるアニメーションにするPythonライブラリです。**
 
 行の絞り込み、表の結合、グループごとの合計を記録し、一つのHTMLへ書き出します。
 読む人は工程を止めたり戻したり、値を選んで元の入力セルを確認できます。
 再生時にPythonサーバーや外部通信は必要ありません。
 
-**インストール前に試す:** [単体で動くデモHTML](docs/index.html)を保存してブラウザーで
-開けます。「Add the sales in each category」から Books の合計 `270` を選ぶと、
-元の売上 `120` と `150` までたどれます。データは合成です。GitHub上では
-HTMLのソースを眺めるのではなく、元ファイルをダウンロードしてください。
+**インストール前に試す:** [ブラウザーのデモ](https://miruky.github.io/framechoreo/)を
+開き、「Add the sales in each category」から Books の合計 `270` を選ぶと、
+元の売上 `120` と `150` までたどれます。データは合成です。
+[単体HTML](docs/index.html)を保存すればオフラインでも動きます。
 
 初期版は、記事・授業・分析手順の説明に使う小さなデータを対象としています。
 大きめの分析には`DataStory.for_analysis()`で記録量を明示して広げられます。
