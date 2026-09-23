@@ -19,7 +19,7 @@ from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 from .profile import profile_frame
 
-VERSION = "1.0.0rc2"
+VERSION = "1.0.0rc3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +32,54 @@ class ColumnRef:
 def col(name: str) -> ColumnRef:
     """Refer to a column in a conditional value or comparison."""
     return ColumnRef(_text(name, "column", 100))
+
+
+@dataclass(frozen=True, slots=True)
+class Condition:
+    """An explicit comparison tree evaluated with pandas nullable-boolean logic."""
+
+    kind: str
+    column: str | None = None
+    op: str | None = None
+    value: Any = None
+    children: tuple[Condition, ...] = ()
+
+    def __and__(self, other: Condition) -> Condition:
+        if not isinstance(other, Condition):
+            return NotImplemented
+        return Condition("all", children=(self, other))
+
+    def __or__(self, other: Condition) -> Condition:
+        if not isinstance(other, Condition):
+            return NotImplemented
+        return Condition("any", children=(self, other))
+
+    def __invert__(self) -> Condition:
+        return Condition("not", children=(self,))
+
+    def __bool__(self) -> bool:
+        raise TypeError("Combine conditions with &, |, and ~, not and/or/not")
+
+
+def where(column: str, op: str, value: Any = None) -> Condition:
+    """Build a safe, explicit condition for ``case_when`` or ``filter_by``."""
+    name = _text(column, "column", 100)
+    if op not in (
+        "eq",
+        "ne",
+        "gt",
+        "ge",
+        "lt",
+        "le",
+        "is_missing",
+        "is_not_missing",
+        "in",
+        "between",
+    ):
+        raise ValueError("Unsupported condition operator")
+    return Condition(
+        "atom", column=name, op=op, value=tuple(value) if isinstance(value, list) else value
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,8 +208,10 @@ def _operand(
 
 def _condition(
     df: pd.DataFrame, column: str, op: str, value: Any
-) -> tuple[dict[str, Any], str | None, list[str]]:
+) -> tuple[dict[str, Any], list[str], list[str]]:
     _keys([column], df.columns)
+    if not isinstance(op, str):
+        raise ValueError("Unsupported condition operator")
     comparisons = {
         "eq": operator.eq,
         "ne": operator.ne,
@@ -173,16 +223,36 @@ def _condition(
     if op in ("is_missing", "is_not_missing"):
         if value is not None:
             raise ValueError("Missingness conditions do not accept a comparison value")
-        operand, other_column, target = None, None, None
+        operand, fields = None, [column]
         mask = df[column].isna() if op == "is_missing" else df[column].notna()
     elif op in comparisons:
         operand, other_column, target = _operand(value, df.columns)
+        fields = [column, *([other_column] if other_column else [])]
         if other_column is not None:
             target = df[other_column]
         try:
             mask = comparisons[op](df[column], target)
         except (TypeError, ValueError) as exc:
             raise ValueError("Condition operands cannot be compared") from exc
+    elif op == "in":
+        if not isinstance(value, (tuple, list)) or len(value) > 1000:
+            raise ValueError(
+                "Membership values must be an ordered sequence of at most 1000 scalars"
+            )
+        cells = [encode_cell(item) for item in value]
+        operand, fields = {"values": cells}, [column]
+        mask = df[column].isin(value)
+    elif op == "between":
+        if not isinstance(value, (tuple, list)) or len(value) != 2:
+            raise ValueError("between requires lower and upper bounds")
+        bounds = [_operand(bound, df.columns) for bound in value]
+        operand = {"bounds": [item[0] for item in bounds]}
+        fields = [column, *(item[1] for item in bounds if item[1])]
+        targets = [df[item[1]] if item[1] else item[2] for item in bounds]
+        try:
+            mask = df[column].between(*targets, inclusive="both")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Condition bounds cannot be compared") from exc
     else:
         raise ValueError("Unsupported condition operator")
     try:
@@ -192,7 +262,64 @@ def _condition(
     if len(boolean) != len(df):
         raise ValueError("Condition must produce one boolean per row")
     outcomes = ["missing" if pd.isna(x) else "true" if x else "false" for x in boolean]
-    return {"column": column, "op": op, "value": operand}, other_column, outcomes
+    return {"column": column, "op": op, "value": operand}, fields, outcomes
+
+
+def _evaluate_condition(
+    df: pd.DataFrame, expression: Condition, *, depth: int = 0, count: list[int] | None = None
+) -> tuple[dict[str, Any], list[str], list[str], list[list[str]]]:
+    if not isinstance(expression, Condition):
+        raise ValueError("Invalid condition tree")
+    if count is None:
+        count = [0]
+    if depth > 8:
+        raise ValueError("Condition tree exceeds depth 8")
+    if expression.kind == "atom":
+        count[0] += 1
+        if count[0] > 32:
+            raise ValueError("Condition tree exceeds 32 comparisons")
+        if expression.children:
+            raise ValueError("An atomic condition cannot have children")
+        record, fields, outcomes = _condition(
+            df, expression.column, expression.op, expression.value
+        )
+        return record, fields, outcomes, [outcomes]
+    if expression.kind not in ("all", "any", "not") or len(expression.children) != (
+        1 if expression.kind == "not" else 2
+    ):
+        raise ValueError("Invalid condition tree")
+    parts = [
+        _evaluate_condition(df, child, depth=depth + 1, count=count)
+        for child in expression.children
+    ]
+    arrays = [
+        pd.array(
+            [pd.NA if value == "missing" else value == "true" for value in part[2]], dtype="boolean"
+        )
+        for part in parts
+    ]
+    result = (
+        ~arrays[0]
+        if expression.kind == "not"
+        else arrays[0] & arrays[1]
+        if expression.kind == "all"
+        else arrays[0] | arrays[1]
+    )
+    outcomes = ["missing" if pd.isna(x) else "true" if x else "false" for x in result]
+    return (
+        {"kind": expression.kind, "children": [part[0] for part in parts]},
+        [field for part in parts for field in part[1]],
+        outcomes,
+        [leaf for part in parts for leaf in part[3]],
+    )
+
+
+def _condition_leaves(record: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    if "kind" not in record:
+        yield record
+    else:
+        for child in record["children"]:
+            yield from _condition_leaves(child)
 
 
 class DataStory:
@@ -1270,9 +1397,10 @@ class StoryFrame:
         self,
         name: str,
         *,
-        column: str,
-        op: str,
+        column: str | None = None,
+        op: str | None = None,
         value: Any = None,
+        condition: Condition | None = None,
         then: Any,
         otherwise: Any,
         label: str = "Choose a value by condition",
@@ -1286,7 +1414,20 @@ class StoryFrame:
         if not isinstance(name, str) or not name.strip() or name in df.columns:
             raise ValueError("name must be a new nonempty column name")
         validate_text(name)
-        condition, other_column, outcomes = _condition(df, column, op, value)
+        if condition is not None:
+            if (
+                not isinstance(condition, Condition)
+                or column is not None
+                or op is not None
+                or value is not None
+            ):
+                raise ValueError("Use either condition or column/op/value")
+            condition_record, fields, outcomes, clause_outcomes = _evaluate_condition(df, condition)
+        else:
+            if column is None or op is None:
+                raise ValueError("column and op are required without condition")
+            condition_record, fields, outcomes = _condition(df, column, op, value)
+            clause_outcomes = None
         true_record, true_column, true_literal = _operand(then, df.columns, allow_missing=True)
         false_record, false_column, false_literal = _operand(
             otherwise, df.columns, allow_missing=True
@@ -1300,9 +1441,7 @@ class StoryFrame:
             )
             selected_values.append(df[chosen_column].array[i] if chosen_column else literal)
             value_refs.append((_CellRef(self.step_id, i, chosen_column),) if chosen_column else ())
-            control_refs.append(
-                tuple(_CellRef(self.step_id, i, c) for c in [column, other_column] if c)
-            )
+            control_refs.append(tuple(_CellRef(self.step_id, i, c) for c in fields))
         df[name] = pd.Series(selected_values, index=df.index).array
         original = self._snapshot.frame.columns
         return self._story._add(
@@ -1319,10 +1458,11 @@ class StoryFrame:
             cell_controls=tuple({name: control_refs[i]} for i in range(len(df))),
             parameters={
                 "name": name,
-                "condition": condition,
+                "condition": condition_record,
                 "then": true_record,
                 "otherwise": false_record,
                 "outcomes": outcomes,
+                **({"clause_outcomes": clause_outcomes} if clause_outcomes is not None else {}),
             },
         )
 
@@ -1385,15 +1525,23 @@ class StoryFrame:
 
     def filter_by(
         self,
-        column: str,
+        column: str | Condition,
         *,
-        op: str,
+        op: str | None = None,
         value: Any = None,
         label: str = "Filter by condition",
     ) -> StoryFrame:
         """Filter using an explicit condition and retain every input-row outcome."""
         df = self.to_pandas()
-        condition, other_column, outcomes = _condition(df, column, op, value)
+        if isinstance(column, Condition):
+            if op is not None or value is not None:
+                raise ValueError("A condition tree cannot also receive op or value")
+            condition_record, fields, outcomes, clause_outcomes = _evaluate_condition(df, column)
+        else:
+            if op is None:
+                raise ValueError("op is required for a column condition")
+            condition_record, fields, outcomes = _condition(df, column, op, value)
+            clause_outcomes = None
         selected = [i for i, outcome in enumerate(outcomes) if outcome == "true"]
         output = df.iloc[selected]
         return self._story._add(
@@ -1407,14 +1555,14 @@ class StoryFrame:
                 {c: (_CellRef(self.step_id, i, c),) for c in df.columns} for i in selected
             ),
             row_controls=tuple(
-                tuple(_CellRef(self.step_id, i, c) for c in [column, other_column] if c)
-                for i in selected
+                tuple(_CellRef(self.step_id, i, c) for c in fields) for i in selected
             ),
             parameters={
-                "condition": condition,
+                "condition": condition_record,
                 "outcomes": outcomes,
                 "selected_rows": selected,
                 "removed_rows": len(df) - len(selected),
+                **({"clause_outcomes": clause_outcomes} if clause_outcomes is not None else {}),
             },
         )
 
@@ -1571,6 +1719,113 @@ class StoryFrame:
             },
         )
 
+    def group_transform(
+        self,
+        name: str,
+        *,
+        by: str | Sequence[str],
+        value: str,
+        op: str,
+        dropna: bool,
+        min_count: int | None = None,
+        label: str = "Attach a group metric to every row",
+    ) -> StoryFrame:
+        """Broadcast one pandas group metric without collapsing the original rows.
+
+        Every non-missing candidate in a group is an input to its repeated
+        metric. Grouping-key cells are separate decision inputs. A large
+        broadcast raises rather than silently dropping provenance.
+        """
+        df = self.to_pandas()
+        if not isinstance(name, str) or not name.strip() or name in df.columns:
+            raise ValueError("name must be a new nonempty column name")
+        validate_text(name)
+        keys = self._group_keys_and_value(df, by, value)
+        if not isinstance(dropna, bool):
+            raise ValueError("dropna must be a boolean")
+        if op not in ("sum", "mean", "min", "max", "count", "nunique"):
+            raise ValueError("Unsupported group transformation")
+        if op in ("sum", "mean", "min", "max") and (
+            not pd.api.types.is_numeric_dtype(df[value].dtype)
+            or pd.api.types.is_bool_dtype(df[value].dtype)
+        ):
+            raise UnsupportedDataError("This group transformation requires numeric values")
+        if op == "sum":
+            minimum = 1 if min_count is None else min_count
+            if (
+                isinstance(minimum, bool)
+                or not isinstance(minimum, int)
+                or not 0 <= minimum <= 2**53 - 1
+            ):
+                raise ValueError("min_count must be an integer from 0 through 2**53 - 1")
+        elif min_count is not None:
+            raise ValueError("min_count applies only to sum")
+        grouped = df.groupby(keys, dropna=dropna, sort=False, observed=True)
+        values = grouped[value]
+        calculated = (
+            values.transform(lambda s: s.sum(min_count=minimum))
+            if op == "sum"
+            else values.transform(op)
+        )
+        ids = grouped.ngroup().to_numpy()
+        groups_by_id: dict[int, list[int]] = {}
+        excluded = []
+        for position, group_id in enumerate(ids):
+            if pd.isna(group_id):
+                excluded.append(position)
+            else:
+                groups_by_id.setdefault(int(group_id), []).append(position)
+        groups = list(groups_by_id.values())
+        row_groups: list[int | None] = [None] * len(df)
+        inputs: list[tuple[_CellRef, ...]] = [()] * len(df)
+        controls: list[tuple[_CellRef, ...]] = [()] * len(df)
+        reference_count = 0
+        for group_index, members in enumerate(groups):
+            candidates = tuple(
+                _CellRef(self.step_id, i, value) for i in members if pd.notna(df[value].array[i])
+            )
+            group_keys = tuple(_CellRef(self.step_id, i, key) for i in members for key in keys)
+            reference_count += len(members) * (len(candidates) + len(group_keys))
+            if reference_count > 250_000:
+                raise CaptureLimitError("Group transform exceeds 250,000 provenance references")
+            for i in members:
+                row_groups[i] = group_index
+                inputs[i] = candidates
+                controls[i] = group_keys
+        for i in excluded:
+            controls[i] = tuple(_CellRef(self.step_id, i, key) for key in keys)
+            reference_count += len(keys)
+            if reference_count > 250_000:
+                raise CaptureLimitError("Group transform exceeds 250,000 provenance references")
+        df[name] = calculated.array
+        original = self._snapshot.frame.columns
+        parameters = {
+            "name": name,
+            "by": keys,
+            "value": value,
+            "op": op,
+            "dropna": dropna,
+            "groups": groups,
+            "row_groups": row_groups,
+            "excluded_rows": excluded,
+        }
+        if op == "sum":
+            parameters["min_count"] = minimum
+        return self._story._add(
+            df,
+            name="Grouped row metric",
+            operation="group_transform",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {**{c: (_CellRef(self.step_id, i, c),) for c in original}, name: inputs[i]}
+                for i in range(len(df))
+            ),
+            cell_controls=tuple({name: controls[i]} for i in range(len(df))),
+            parameters=parameters,
+        )
+
     def filter_rows(
         self,
         predicate: Callable[[pd.DataFrame], Any] | Any,
@@ -1682,11 +1937,19 @@ class StoryFrame:
         overlap = (set(left_df.columns) & set(right_df.columns)) - common
         row_parents, cell_parents = [], []
         no_left = no_right = 0
+        left_match_counts = [0] * len(left_df)
+        right_match_counts = [0] * len(right_df)
+        null_key_output_rows = []
         for li, ri in zip(mapping[left_marker].array, mapping[right_marker].array, strict=True):
             li = None if pd.isna(li) else int(li)
             ri = None if pd.isna(ri) else int(ri)
             no_left += li is None
             no_right += ri is None
+            if li is not None and ri is not None:
+                left_match_counts[li] += 1
+                right_match_counts[ri] += 1
+                if any(pd.isna(left_df[key].array[li]) for key in left_keys):
+                    null_key_output_rows.append(len(row_parents))
             refs = []
             if li is not None:
                 refs.append(_RowRef(self.step_id, li))
@@ -1707,6 +1970,21 @@ class StoryFrame:
                     out = c + suffixes[1] if c in overlap else c
                     cells[out] = (_CellRef(right.step_id, ri, c),) if ri is not None else ()
             cell_parents.append(cells)
+        audit = {
+            "left_match_counts": left_match_counts,
+            "right_match_counts": right_match_counts,
+            "left_unmatched": [i for i, count in enumerate(left_match_counts) if count == 0],
+            "right_unmatched": [i for i, count in enumerate(right_match_counts) if count == 0],
+            "left_fanout": [i for i, count in enumerate(left_match_counts) if count > 1],
+            "right_fanout": [i for i, count in enumerate(right_match_counts) if count > 1],
+            "left_duplicate_keys": np.flatnonzero(
+                left_df.duplicated(subset=left_keys, keep=False).to_numpy()
+            ).tolist(),
+            "right_duplicate_keys": np.flatnonzero(
+                right_df.duplicated(subset=right_keys, keep=False).to_numpy()
+            ).tolist(),
+            "null_key_output_rows": null_key_output_rows,
+        }
         return self._story._add(
             output,
             name="Joined rows",
@@ -1724,8 +2002,16 @@ class StoryFrame:
                 "suffixes": list(suffixes),
                 "unmatched_rows": no_right,
                 "unmatched_left_rows": no_left,
+                "audit": audit,
             },
         )
+
+    def join_audit(self) -> dict[str, Any]:
+        """Return detached input coverage, fanout, and missing-key match details."""
+        step = self._snapshot
+        if step.operation != "merge":
+            raise ValueError("join_audit requires a merge result")
+        return copy.deepcopy(step.parameters["audit"])
 
     def _group_keys_and_value(
         self, df: pd.DataFrame, by: str | Sequence[str], value: str
@@ -2007,6 +2293,29 @@ class StoryFrame:
         ):
             raise IndexError("input_row is an original row position")
         return outcomes[input_row]
+
+    def condition_breakdown(self, input_row: int) -> tuple[dict[str, str], ...]:
+        """Return each atomic comparison's result for an original input row.
+
+        These are comparison outcomes before any enclosing ``~``, ``&``, or
+        ``|`` operator. ``filter_decision`` reports the final tree result.
+        """
+        step = self._snapshot
+        if step.operation not in ("filter_by", "case_when"):
+            raise ValueError("condition_breakdown requires filter_by or case_when")
+        outcomes = step.parameters["outcomes"]
+        if (
+            isinstance(input_row, bool)
+            or not isinstance(input_row, int)
+            or not 0 <= input_row < len(outcomes)
+        ):
+            raise IndexError("input_row is an original row position")
+        leaves = list(_condition_leaves(step.parameters["condition"]))
+        clauses = step.parameters.get("clause_outcomes") or [outcomes]
+        return tuple(
+            {"column": leaf["column"], "op": leaf["op"], "outcome": states[input_row]}
+            for leaf, states in zip(leaves, clauses, strict=True)
+        )
 
     def explain_page(
         self, row: int, column: str, *, offset: int = 0, limit: int = 50

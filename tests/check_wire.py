@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from framechoreo import DataStory, col
+from framechoreo import DataStory, col, where
 from framechoreo.encoding import encode_cell
 
 
@@ -224,6 +224,33 @@ def main():
         min_periods=1,
     )
     cases.append((extrema, [source, low, high, recent_low, recent_high]))
+
+    audited = DataStory()
+    left = audited.table(pd.DataFrame({"key": ["a", "b", None], "amount": [10, 20, 30]}))
+    right = audited.table(pd.DataFrame({"code": ["a", "a", None], "kind": ["x", "y", "z"]}))
+    joined = left.merge(right, left_on="key", right_on="code", how="outer", validate="one_to_many")
+    cases.append((audited, [left, right, joined]))
+
+    self_join = DataStory()
+    one = self_join.table(pd.DataFrame({"key": ["a", "b"], "v": [1, 2]}))
+    twice = one.merge(one, on="key", validate="one_to_one")
+    cases.append((self_join, [one, twice]))
+
+    broadcast = DataStory()
+    raw = broadcast.table(
+        pd.DataFrame(
+            {
+                "group": ["a", "b", "a", None],
+                "v": pd.array([2, 4, None, 7], dtype="Int64"),
+                "flag": [True, False, True, False],
+            }
+        )
+    )
+    total = raw.group_transform("total", by="group", value="v", op="sum", dropna=True)
+    rule = (where("v", "ge", 2) & where("group", "in", ["a", "b"])) | ~where("flag", "eq", True)
+    chosen = total.case_when("decision", condition=rule, then=col("total"), otherwise=0)
+    selected = chosen.filter_by(rule)
+    cases.append((broadcast, [raw, total, chosen, selected]))
 
     for story, frames in cases:
         checks = []

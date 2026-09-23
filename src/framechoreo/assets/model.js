@@ -49,17 +49,119 @@
       : Object.prototype.hasOwnProperty.call(value, "constant") &&
         validCell(value.constant) &&
         (allowMissing || value.constant.type !== "missing"));
-  const conditionFields = (condition, columns) => {
-    if (!record(condition) || !columns.includes(condition.column)) return null;
-    if (["is_missing", "is_not_missing"].includes(condition.op))
-      return condition.value === null ? [condition.column] : null;
+  function conditionFields(condition, columns, depth = 0, counter = { leaves: 0 }) {
+    if (!record(condition) || depth > 8) return null;
+    if (["all", "any", "not"].includes(condition.kind)) {
+      const arity = condition.kind === "not" ? 1 : 2;
+      if (
+        !sameList(Object.keys(condition).sort(), ["children", "kind"]) ||
+        !Array.isArray(condition.children) ||
+        condition.children.length !== arity
+      )
+        return null;
+      const parts = condition.children.map((child) =>
+        conditionFields(child, columns, depth + 1, counter),
+      );
+      return parts.every(Array.isArray) ? parts.flat() : null;
+    }
     if (
-      !["eq", "ne", "gt", "ge", "lt", "le"].includes(condition.op) ||
-      !operand(condition.value, columns)
+      condition.kind !== undefined ||
+      !sameList(Object.keys(condition).sort(), ["column", "op", "value"]) ||
+      !columns.includes(condition.column)
     )
       return null;
-    return [condition.column, ...(condition.value.column ? [condition.value.column] : [])];
-  };
+    counter.leaves++;
+    if (counter.leaves > 32) return null;
+    if (["is_missing", "is_not_missing"].includes(condition.op))
+      return condition.value === null ? [condition.column] : null;
+    if (["eq", "ne", "gt", "ge", "lt", "le"].includes(condition.op))
+      return operand(condition.value, columns)
+        ? [condition.column, ...(condition.value.column ? [condition.value.column] : [])]
+        : null;
+    if (condition.op === "in")
+      return record(condition.value) &&
+        sameList(Object.keys(condition.value), ["values"]) &&
+        Array.isArray(condition.value.values) &&
+        condition.value.values.length <= 1000 &&
+        condition.value.values.every(validCell)
+        ? [condition.column]
+        : null;
+    if (condition.op === "between") {
+      const bounds = condition.value?.bounds;
+      return record(condition.value) &&
+        sameList(Object.keys(condition.value), ["bounds"]) &&
+        Array.isArray(bounds) &&
+        bounds.length === 2 &&
+        bounds.every((bound) => operand(bound, columns))
+        ? [condition.column, ...bounds.flatMap((bound) => (bound.column ? [bound.column] : []))]
+        : null;
+    }
+    return null;
+  }
+  function conditionLeaves(condition) {
+    return condition.kind ? condition.children.flatMap(conditionLeaves) : [condition];
+  }
+  function conditionResult(condition, clauses, row, cursor) {
+    if (!condition.kind) return clauses[cursor.index++][row];
+    const first = conditionResult(condition.children[0], clauses, row, cursor);
+    if (condition.kind === "not")
+      return first === "missing" ? "missing" : first === "true" ? "false" : "true";
+    const second = conditionResult(condition.children[1], clauses, row, cursor);
+    if (condition.kind === "all")
+      return first === "false" || second === "false"
+        ? "false"
+        : first === "true" && second === "true"
+          ? "true"
+          : "missing";
+    return first === "true" || second === "true"
+      ? "true"
+      : first === "false" && second === "false"
+        ? "false"
+        : "missing";
+  }
+  function conditionBreakdown(step, inputRow) {
+    const leaves = conditionLeaves(step.parameters.condition),
+      clauses = step.parameters.clause_outcomes || [step.parameters.outcomes];
+    if (
+      clauses.length !== leaves.length ||
+      !Number.isSafeInteger(inputRow) ||
+      inputRow < 0 ||
+      inputRow >= step.parameters.outcomes.length
+    )
+      return [];
+    return leaves.map((leaf, i) => ({
+      column: leaf.column,
+      op: leaf.op,
+      outcome: clauses[i][inputRow],
+    }));
+  }
+  function conditionFormula(step, inputRow, language = "en") {
+    const clauses = step.parameters.clause_outcomes;
+    if (
+      !Array.isArray(clauses) ||
+      !Number.isSafeInteger(inputRow) ||
+      inputRow < 0 ||
+      inputRow >= step.parameters.outcomes.length
+    )
+      return "";
+    const names =
+      language === "ja"
+        ? { true: "成立", false: "不成立", missing: "欠損" }
+        : { true: "true", false: "false", missing: "missing" };
+    const cursor = { index: 0 };
+    const render = (node) => {
+      if (!node.kind) return names[clauses[cursor.index++][inputRow]];
+      if (node.kind === "not") return "NOT (" + render(node.children[0]) + ")";
+      return (
+        "(" +
+        render(node.children[0]) +
+        (node.kind === "all" ? " AND " : " OR ") +
+        render(node.children[1]) +
+        ")"
+      );
+    };
+    return render(step.parameters.condition) + " → " + names[step.parameters.outcomes[inputRow]];
+  }
   function metrics(step) {
     if (step.operation === "group_agg") return step.parameters.metrics;
     return Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)
@@ -278,6 +380,24 @@
         p.outcomes.some((outcome) => !["true", "false", "missing"].includes(outcome))
       )
         invalid("invalid condition");
+      if (p.clause_outcomes !== undefined) {
+        const leaves = conditionLeaves(p.condition);
+        if (
+          !Array.isArray(p.clause_outcomes) ||
+          p.clause_outcomes.length !== leaves.length ||
+          p.clause_outcomes.some(
+            (states) =>
+              !Array.isArray(states) ||
+              states.length !== parent.rows.length ||
+              states.some((outcome) => !["true", "false", "missing"].includes(outcome)),
+          )
+        )
+          invalid("invalid comparison outcomes");
+        p.outcomes.forEach((outcome, row) => {
+          if (conditionResult(p.condition, p.clause_outcomes, row, { index: 0 }) !== outcome)
+            invalid("inconsistent condition logic");
+        });
+      }
       if (step.operation === "case_when") {
         if (
           !p.name ||
@@ -459,6 +579,87 @@
       }
       if (seen.size !== parent.rows.length) invalid("window omitted rows");
     }
+    if (step.operation === "group_transform") {
+      if (
+        !p.name ||
+        columns.includes(p.name) ||
+        !sameList(step.columns, [...columns, p.name]) ||
+        !namedKeys(p.by, columns) ||
+        !columns.includes(p.value) ||
+        p.by.includes(p.value) ||
+        !["sum", "mean", "min", "max", "count", "nunique"].includes(p.op) ||
+        typeof p.dropna !== "boolean" ||
+        (p.op === "sum"
+          ? !Number.isSafeInteger(p.min_count) || p.min_count < 0
+          : p.min_count !== undefined) ||
+        !Array.isArray(p.groups) ||
+        !Array.isArray(p.row_groups) ||
+        p.row_groups.length !== parent.rows.length ||
+        !Array.isArray(p.excluded_rows) ||
+        step.rows.length !== parent.rows.length
+      )
+        invalid("invalid grouped row metric");
+      const seen = new Set();
+      for (const [groupIndex, members] of p.groups.entries()) {
+        if (!Array.isArray(members) || !members.length) invalid("empty grouped row metric");
+        members.forEach((position, j) => {
+          if (
+            !Number.isSafeInteger(position) ||
+            position < 0 ||
+            position >= parent.rows.length ||
+            seen.has(position) ||
+            (j && position <= members[j - 1])
+          )
+            invalid("invalid grouped metric membership");
+          seen.add(position);
+          if (p.row_groups[position] !== groupIndex)
+            invalid("inconsistent grouped metric color identity");
+        });
+        const candidates = members
+          .filter(
+            (position) => parent.rows[position].cells[columns.indexOf(p.value)].type !== "missing",
+          )
+          .map((row) => ref(row, p.value));
+        const keyRefs = members.flatMap((row) => p.by.map((column) => ref(row, column)));
+        for (const position of members) {
+          const row = step.rows[position];
+          if (
+            !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+            !sameRefs(row.cell_parents[p.name], candidates) ||
+            !record(row.cell_controls) ||
+            !sameList(Object.keys(row.cell_controls), [p.name]) ||
+            !sameRefs(row.cell_controls[p.name], keyRefs)
+          )
+            invalid("inconsistent grouped metric inputs");
+        }
+      }
+      const excluded = parent.rows.flatMap((_, i) => (seen.has(i) ? [] : [i]));
+      if (!sameList(p.excluded_rows, excluded) || (!p.dropna && excluded.length))
+        invalid("inconsistent grouped metric exclusions");
+      for (const position of excluded) {
+        const row = step.rows[position];
+        if (
+          p.row_groups[position] !== null ||
+          !p.by.some(
+            (column) => parent.rows[position].cells[columns.indexOf(column)].type === "missing",
+          ) ||
+          !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+          !sameRefs(row.cell_parents[p.name], []) ||
+          !record(row.cell_controls) ||
+          !sameList(Object.keys(row.cell_controls), [p.name]) ||
+          !sameRefs(
+            row.cell_controls[p.name],
+            p.by.map((column) => ref(position, column)),
+          )
+        )
+          invalid("inconsistent excluded group row");
+      }
+      step.rows.forEach((row, i) => {
+        for (const column of columns)
+          if (!sameRefs(row.cell_parents[column], [ref(i, column)]))
+            invalid("inconsistent unchanged grouped metric value");
+      });
+    }
   }
   function indexStory(data) {
     if (!data || data.format !== "framechoreo.story" || data.schema_version !== 1) {
@@ -500,6 +701,7 @@
       pivot: 1,
       concat: -1,
       group_agg: 1,
+      group_transform: 1,
       case_when: 1,
       filter_by: 1,
       window: 1,
@@ -765,6 +967,67 @@
           (["left", "inner"].includes(p.how) && noLeft !== 0)
         )
           invalid("inconsistent join counts");
+        if (p.audit !== undefined) {
+          const audit = p.audit,
+            leftCounts = Array(left.rows.length).fill(0),
+            rightCounts = Array(right.rows.length).fill(0),
+            nullRows = [];
+          if (!record(audit)) invalid("invalid join audit");
+          step.rows.forEach((row, i) => {
+            let li = null,
+              ri = null;
+            if (row.parents.length === 2) {
+              if (row.parents[0].step !== left.id || row.parents[1].step !== right.id)
+                invalid("invalid join audit correspondence");
+              li = row.parents[0].row;
+              ri = row.parents[1].row;
+            } else if (row.parents.length === 1 && left.id !== right.id) {
+              const only = row.parents[0];
+              if (only.step === left.id) li = only.row;
+              else if (only.step === right.id) ri = only.row;
+              else invalid("invalid join audit input");
+            } else invalid("invalid join audit row");
+            if (li !== null && ri !== null) {
+              leftCounts[li]++;
+              rightCounts[ri]++;
+              if (
+                leftKeys.some(
+                  (key) => left.rows[li].cells[left.columns.indexOf(key)].type === "missing",
+                )
+              )
+                nullRows.push(i);
+            }
+          });
+          const positions = (list, n) =>
+            Array.isArray(list) &&
+            list.every(
+              (v, i) => Number.isSafeInteger(v) && v >= 0 && v < n && (i === 0 || v > list[i - 1]),
+            );
+          if (
+            !sameList(audit.left_match_counts, leftCounts) ||
+            !sameList(audit.right_match_counts, rightCounts) ||
+            !sameList(
+              audit.left_unmatched,
+              leftCounts.flatMap((n, i) => (n === 0 ? [i] : [])),
+            ) ||
+            !sameList(
+              audit.right_unmatched,
+              rightCounts.flatMap((n, i) => (n === 0 ? [i] : [])),
+            ) ||
+            !sameList(
+              audit.left_fanout,
+              leftCounts.flatMap((n, i) => (n > 1 ? [i] : [])),
+            ) ||
+            !sameList(
+              audit.right_fanout,
+              rightCounts.flatMap((n, i) => (n > 1 ? [i] : [])),
+            ) ||
+            !sameList(audit.null_key_output_rows, nullRows) ||
+            !positions(audit.left_duplicate_keys, left.rows.length) ||
+            !positions(audit.right_duplicate_keys, right.rows.length)
+          )
+            invalid("inconsistent join audit");
+        }
       }
       if (Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)) {
         const p = step.parameters,
@@ -1044,6 +1307,12 @@
           "値の入力元と判定入力は別に表示します。";
       } else if (step.operation === "filter_by")
         text = "条件を満たした行です。判定に使った入力は、コピーした値の入力元と分けて表示します。";
+      else if (step.operation === "group_transform" && reference.column === step.parameters.name)
+        text = step.parameters.excluded_rows.includes(reference.row)
+          ? "グループのキーが欠損していて除外されたため、この行の指標は欠損です。"
+          : "同じグループの" +
+            refs.length +
+            "件の非欠損候補から求めた指標を、各行へ繰り返しています。グループ判定のキーは別に表示します。";
       else if (step.operation === "window" && reference.column === step.parameters.name) {
         const op = step.parameters.op;
         if (op === "lag" && refs.length === 0)
@@ -1160,6 +1429,16 @@
     if (step.operation === "filter_by")
       return {
         text: "This row passed the condition. Its deciding inputs are separate from its copied value inputs.",
+      };
+    if (step.operation === "group_transform" && reference.column === p.name)
+      return {
+        text: p.excluded_rows.includes(reference.row)
+          ? "This missing-key row was excluded from grouping, so its group metric is missing."
+          : "The " +
+            p.op +
+            " considered " +
+            row.cell_parents[p.name].length +
+            " non-missing group candidates and repeats the metric beside each member. Group keys are separate decision inputs.",
       };
     if (step.operation === "window" && reference.column === p.name) {
       const count = row.cell_parents[p.name].length;
@@ -1338,6 +1617,10 @@
       if (!row) return null;
       if (Object.prototype.hasOwnProperty.call(aggregateScene, step.operation))
         return { step: stepId, row: position };
+      if (step.operation === "group_transform") {
+        const group = step.parameters.row_groups[position];
+        return group === null ? null : { step: stepId, row: group };
+      }
       if (["source", "concat", "pivot", "melt"].includes(step.operation)) return null;
       const parent = row.parents.find((r) => r.step === step.parents[0]);
       if (!parent) return null;
@@ -1347,7 +1630,11 @@
     return null;
   }
   function groupTitle(scene, groupIndex) {
-    const row = scene.step.rows[groupIndex];
+    const rowPosition =
+      scene.step.operation === "group_transform"
+        ? scene.step.parameters.groups[groupIndex][0]
+        : groupIndex;
+    const row = scene.step.rows[rowPosition];
     return scene.step.parameters.by
       .map((key) => {
         const cell = row.cells[scene.step.columns.indexOf(key)];
@@ -1369,34 +1656,52 @@
       .map((i) => scene.table.rows[i])
       .concat(scene.table.rows.filter((r) => !seen.has(r.position)));
   }
+  function cellCode(cell) {
+    if (cell.type === "string") return JSON.stringify(cell.value);
+    if (cell.type === "boolean") return cell.value ? "True" : "False";
+    if (cell.type === "missing") return "None";
+    if (cell.type === "float" && !Number.isFinite(Number(cell.value)))
+      return "float(" + JSON.stringify(cell.value) + ")";
+    if (cell.type === "decimal") return "Decimal(" + JSON.stringify(cell.value) + ")";
+    if (cell.type === "datetime" || cell.type === "duration") return JSON.stringify(cell.value);
+    return cell.display;
+  }
+  function operandCode(value) {
+    return value.column ? "col(" + JSON.stringify(value.column) + ")" : cellCode(value.constant);
+  }
+  function conditionCode(condition) {
+    if (condition.kind === "not") return "~(" + conditionCode(condition.children[0]) + ")";
+    if (["all", "any"].includes(condition.kind))
+      return (
+        "(" +
+        condition.children.map(conditionCode).join(condition.kind === "all" ? " & " : " | ") +
+        ")"
+      );
+    const start = "where(" + JSON.stringify(condition.column) + ", " + JSON.stringify(condition.op);
+    if (condition.value === null) return start + ")";
+    const value =
+      condition.op === "in"
+        ? "[" + condition.value.values.map(cellCode).join(", ") + "]"
+        : condition.op === "between"
+          ? "(" + condition.value.bounds.map(operandCode).join(", ") + ")"
+          : operandCode(condition.value);
+    return start + ", " + value + ")";
+  }
   function description(scene) {
     const p = scene.step.parameters;
     if (scene.kind === "source") return "Recorded input";
     if (scene.kind === "filter") return "filter_rows(predicate)";
-    if (scene.kind === "filter_by")
-      return (
-        "filter_by(" +
-        JSON.stringify(p.condition.column) +
-        ", op=" +
-        JSON.stringify(p.condition.op) +
-        ", value=" +
-        JSON.stringify(p.condition.value) +
-        ")"
-      );
+    if (scene.kind === "filter_by") return "filter_by(" + conditionCode(p.condition) + ")";
     if (scene.kind === "case_when")
       return (
         "case_when(" +
         JSON.stringify(p.name) +
-        ", column=" +
-        JSON.stringify(p.condition.column) +
-        ", op=" +
-        JSON.stringify(p.condition.op) +
-        ", value=" +
-        JSON.stringify(p.condition.value) +
+        ", condition=" +
+        conditionCode(p.condition) +
         ", then=" +
-        JSON.stringify(p.then) +
+        operandCode(p.then) +
         ", otherwise=" +
-        JSON.stringify(p.otherwise) +
+        operandCode(p.otherwise) +
         ")"
       );
     if (scene.kind === "window")
@@ -1415,6 +1720,21 @@
         p.size +
         ", min_periods=" +
         p.min_periods +
+        ")"
+      );
+    if (scene.kind === "group_transform")
+      return (
+        "group_transform(" +
+        JSON.stringify(p.name) +
+        ", by=" +
+        JSON.stringify(p.by) +
+        ", value=" +
+        JSON.stringify(p.value) +
+        ", op=" +
+        JSON.stringify(p.op) +
+        ", dropna=" +
+        (p.dropna ? "True" : "False") +
+        (p.min_count === undefined ? "" : ", min_count=" + p.min_count) +
         ")"
       );
     if (scene.kind === "coalesce")
@@ -1571,6 +1891,9 @@
     cellKey,
     cellExplanation,
     controlInputs,
+    conditionFields,
+    conditionBreakdown,
+    conditionFormula,
     tableLabel,
     groupTitle,
     orderedRows,

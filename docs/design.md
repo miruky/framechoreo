@@ -18,6 +18,13 @@ Filter lineage comes from the accepted boolean mask. Merge lineage comes from
 a key-only pandas merge with positional markers. The public result comes from a
 separate ordinary pandas merge, preserving its column metadata. Group membership
 comes from the native GroupBy object and its group numbers.
+The join's positional correspondence also yields input match counts, unmatched
+rows on either side, one-to-many fanout, duplicate key rows, and missing-key
+matches. A join audit describes row coverage; it does not make join keys into
+copied output values. The browser independently checks match counts, unmatched
+positions, fanout positions, and missing-key output positions. Duplicate-key
+positions are bounded and ordered but are not re-evaluated using pandas' key
+equality rules in JavaScript.
 
 Explicit conditions add a second provenance relation. `cell_parents` is the
 actual value source; `cell_controls` records cells used to choose a branch,
@@ -26,6 +33,14 @@ retained rows and records every input-row outcome, including removed rows. The
 arbitrary `filter_rows` callback has no inferred control relation. Python
 exposes the current step's decision sources through `explain_controls`; the
 browser displays direct control cells separately.
+`Condition` trees contain only declared comparisons. They are limited to 32
+atomic comparisons and depth 8, and use pandas nullable-boolean AND/OR/NOT
+semantics. Every clause is evaluated; no Python source string or callback is
+serialized for browser execution. Membership and inclusive range conditions
+use pandas' own `isin` and `between` results. Atomic comparison outcomes are
+recorded separately. The player checks that their three-valued combination
+matches the final decision; it does not independently recompute pandas' scalar
+comparisons from encoded display values.
 
 For a sum, value-input references omit missing numeric inputs. Row membership,
 grouping keys, and minimum-count settings are retained separately. Repeated
@@ -90,6 +105,10 @@ provenance, so one window step fails at 250,000 explicit value/control
 references. This is an honest bound rather than silent sampling or a claim of
 50,000-row cumulative support. A future compact lineage representation would
 need cross-language validation before raising this limit.
+`group_transform` repeats one group's metric beside every member. Its value
+and key references can also grow quadratically, so it uses the same 250,000
+explicit-reference bound. It preserves row identity, including duplicate index
+labels, and records excluded missing-key rows separately.
 
 JSON is a versioned display model; it is not a general pandas round-trip format.
 Self-contained HTML includes the matching player and is the primary sharing format. No external font, CDN, telemetry, API

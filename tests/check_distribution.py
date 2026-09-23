@@ -79,12 +79,24 @@ def main() -> None:
             "tests/player-workflow-model.test.cjs",
             "tests/player-reshape.test.cjs",
             "tests/player-decisions.test.cjs",
+            "tests/player-join-audit.test.cjs",
+            "tests/player-group-transform.test.cjs",
+            "tests/player-compound-conditions.test.cjs",
             "tests/test_decisions_windows.py",
+            "tests/test_join_audit.py",
+            "tests/test_group_transform.py",
+            "tests/test_compound_conditions.py",
             "tests/make_decision_fixture.py",
+            "tests/make_join_audit_fixture.py",
+            "tests/make_group_transform_fixture.py",
+            "tests/make_compound_fixture.py",
             "tests/fixtures/retail.json",
             "tests/fixtures/reshape.json",
             "tests/fixtures/decisions.json",
             "tests/fixtures/window_extrema.json",
+            "tests/fixtures/join_audit.json",
+            "tests/fixtures/group_transform.json",
+            "tests/fixtures/compound_conditions.json",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -97,6 +109,9 @@ def main() -> None:
             "examples/retail_workflow.py",
             "examples/reshape_workflow.py",
             "examples/decision_window_workflow.py",
+            "examples/join_audit_workflow.py",
+            "examples/group_transform_workflow.py",
+            "examples/compound_conditions_workflow.py",
             "docs/v1.md",
             "docs/analysis.md",
             "docs/api.md",
@@ -164,7 +179,7 @@ assert clean.profile()["missing_cells"] == 0
 workflow_html = workflow.to_html(result=wide)
 assert 'FrameChoreoWorkbench' in workflow_html and 'framechoreo-license' in workflow_html
 assert 'lang="ja"' in workflow_html
-from framechoreo import col
+from framechoreo import col, where
 decisions = DataStory()
 input_frame = decisions.table(pd.DataFrame({
     "sales": pd.Series([10, None, 30], dtype="Int64"),
@@ -189,6 +204,21 @@ assert [o.row for o in running.explain(2, "running")] == [0, 1, 2]
 assert lowest.to_pandas()["lowest"].tolist() == [10, 10, 10]
 assert recent_high.to_pandas()["recent_high"].tolist() == [10, 20, 30]
 assert 'decision-audit' in decisions.to_html(result=filtered)
+rule = (where("sales", "ge", 10) & where("target", "between", (5, 35)))
+selected = input_frame.filter_by(rule)
+assert [selected.filter_decision(i) for i in range(3)] == ["true", "missing", "true"]
+assert [part["outcome"] for part in selected.condition_breakdown(1)] == ["missing", "true"]
+metric_story = DataStory()
+metric_source = metric_story.table(pd.DataFrame({"g":["a","a","b"],"v":[1.0,None,2.0]}))
+metric = metric_source.group_transform("total", by="g", value="v", op="sum", dropna=False)
+assert metric.to_pandas()["total"].tolist() == [1.0,1.0,2.0]
+assert [o.row for o in metric.explain(1,"total")] == [0]
+join_story = DataStory()
+orders = join_story.table(pd.DataFrame({"key":["a","b"],"amount":[1,2]}))
+catalog = join_story.table(pd.DataFrame({"key":["a","c"],"kind":["x","y"]}))
+joined_audit = orders.merge(catalog,on="key",how="inner",validate="one_to_one")
+assert joined_audit.join_audit()["right_unmatched"] == [1]
+assert 'Join input audit' in join_story.to_html(result=joined_audit)
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
@@ -196,6 +226,8 @@ print(json.dumps({
     "analysis_rows": 1000, "analysis_source_total": last_page.total,
     "workflow_result_rows": len(wide.to_pandas()), "workflow_language": "ja",
     "decision_result_rows": len(filtered.to_pandas()),
+    "compound_result_rows": len(selected.to_pandas()),
+    "group_metric_rows": len(metric.to_pandas()),
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0rc3 — Unpublished candidate
+
+- Add join audits for unmatched left/right inputs, match multiplicity, duplicate keys, and pandas missing-key matches, with links back to source rows.
+- Add row-preserving `group_transform` for six group metrics, with repeated candidate lineage and group colors.
+- Add bounded, explicit AND/OR/NOT conditions with pandas three-valued logic, membership, and inclusive ranges; retain each comparison outcome and all decision inputs separately from value inputs.
+- Add complete join, compound-condition, and grouped-row-metric examples plus Python, browser, and cross-language verification.
+
 ## 1.0.0rc2 — Unpublished candidate
 
 - Add explicit conditional choices, comparison-based filtering, and first-present fallback columns with value and decision inputs kept separate.

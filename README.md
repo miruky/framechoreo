@@ -12,7 +12,7 @@ is needed to replay it.
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
-result was made. **1.0.0rc2 is a local release candidate; it has not been published.**
+result was made. **1.0.0rc3 is a local release candidate; it has not been published.**
 Operations are explicit and their results follow pandas. [The 1.0 guide](docs/v1.md)
 defines the supported workflow, reader features, and compatibility boundaries.
 
@@ -28,7 +28,7 @@ python -m pip install .
 Or install the prepared wheel:
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc2-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc3-py3-none-any.whl
 ```
 
 If you installed an earlier unreleased wheel with the same version, add
@@ -100,13 +100,15 @@ iframe through `_repr_html_()`.
 | `table(df)` | Copies a source DataFrame; supports unique, nonempty string column names and scalar cells |
 | `filter_rows(predicate)` | Evaluates a callable once on a copy, or accepts a boolean mask; rejects input mutation and ambiguous Series alignment |
 | `filter_by(column, op=..., value=...)` | Explicit condition with true/false/missing outcomes for every input row and an excluded-row audit |
+| `where(...)` with `&`, `\|`, `~` | Compose up to 32 comparisons with pandas three-valued logic; supports membership and inclusive ranges |
 | `case_when(name, column=..., op=..., value=..., then=..., otherwise=...)` | Chooses a value while separating the chosen value input from comparison inputs; `col("field")` denotes a column operand |
 | `coalesce(name, [...], default=...)` | Takes the first non-missing field in each row and shows every checked candidate |
 | `window(name, column=..., op=..., by=...)` | Grouped lag/difference, cumulative sum/min/max, and rolling sum/mean/min/max in current row order |
-| `merge(...)` | Left/inner/right/outer; shared or different key names; one-to-one, many-to-one, or one-to-many validation |
+| `merge(...)` / `join_audit()` | Left/inner/right/outer with validated cardinality; inspect unmatched inputs, fanout, duplicate keys, and missing-key matches |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
 | `group_mean(by=..., value=..., dropna=...)` | Numeric non-boolean values; a group with no non-missing values is missing, since pandas skips missing values with no `min_count` to set |
 | `group_count(by=..., value=..., dropna=...)` | Counts non-missing entries of any supported column type per group; this is not the row count, and a fully missing group counts as zero |
+| `group_transform(name, by=..., value=..., op=..., dropna=...)` | Repeat a group's sum/mean/min/max/count/nunique beside each original row with exact candidate inputs |
 | `calculate(name, left=..., op=..., right=...)` | Row-wise add/subtract/multiply/divide with a numeric column or scalar; records actual operands |
 | `sort_values(by, ...)` | Stable sorting with retained positional provenance |
 | `select_columns([...])` / `rename_columns({...})` | Choose, reorder, and rename columns while retaining their inputs |
@@ -120,7 +122,7 @@ iframe through `_repr_html_()`.
 | `profile()` | Native missing, unique, duplicate, and dtype summaries, detached from the snapshot |
 | `annotate(frame, ...)` | Adds a note, chapter, playback hold time, and highlighted columns without changing calculations |
 | `explain(row, column)` | Returns source value inputs, preserving repeated use of the same source cell |
-| `explain_controls(row, column)` / `filter_decision(input_row)` | Returns distinct decision inputs and the outcome for an explicit filter |
+| `explain_controls(row, column)` / `filter_decision(input_row)` / `condition_breakdown(input_row)` | Separates decision inputs, the final outcome, and each comparison's outcome |
 | `explain_page(row, column, offset=..., limit=...)` | Bounded pages with exact totals, including repeated use of an aggregate |
 | `to_html` / `export_html` | Self-contained player; light, dark, or automatic theme |
 
@@ -143,6 +145,8 @@ false or missing comparisons and opens the original row. These features are
 illustrated by `python examples/decision_window_workflow.py`. A long cumulative
 calculation can exceed the separate 250,000-reference provenance cap and raises
 instead of exporting a partial explanation.
+The same cap applies when a `group_transform` repeats a large group metric.
+Compound rules and join audits have their own complete examples.
 Selecting a value brings its origins into view and moves keyboard focus there.
 **Back to selected cell** restores the table and row, including an expanded row view.
 Empty and whitespace-only strings have visible labels and quoted text; their
@@ -215,6 +219,9 @@ python examples/motion_showcase.py
 python examples/retail_workflow.py
 python examples/reshape_workflow.py
 python examples/decision_window_workflow.py
+python examples/compound_conditions_workflow.py
+python examples/join_audit_workflow.py
+python examples/group_transform_workflow.py
 python examples/large_analysis.py --rows 5000
 ```
 

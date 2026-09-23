@@ -329,6 +329,9 @@ p {
 [data-kind="count"] {
   --op-color: var(--op-agg);
 }
+[data-kind="group_transform"] {
+  --op-color: var(--op-agg);
+}
 [data-kind="calculate"],
 [data-kind="case_when"],
 [data-kind="coalesce"],
@@ -342,6 +345,7 @@ p {
 .operation[data-kind="sum"],
 .operation[data-kind="mean"],
 .operation[data-kind="count"],
+.operation[data-kind="group_transform"],
 .operation[data-kind="calculate"],
 .operation[data-kind="case_when"],
 .operation[data-kind="coalesce"],
@@ -869,15 +873,65 @@ p {
 .decision-inputs .muted {
   font-size: 11px;
 }
+.clause-panel:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0;
+}
+.clause-panel .decision-title {
+  color: var(--muted);
+}
+.clause-chip {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--soft);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.clause-chip[data-outcome="true"] {
+  border-color: color-mix(in srgb, var(--g0) 45%, var(--line));
+}
+.clause-chip[data-outcome="false"] {
+  border-color: color-mix(in srgb, var(--g4) 45%, var(--line));
+}
+.clause-chip[data-outcome="missing"] {
+  border-color: color-mix(in srgb, var(--g2) 45%, var(--line));
+}
+.clause-formula {
+  flex-basis: 100%;
+  color: var(--ink);
+  background: var(--soft);
+  border-left: 3px solid var(--op-derive);
+  padding: 6px 9px;
+  font:
+    11px/1.5 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  overflow-wrap: anywhere;
+}
+.decision-clause-summary {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 .decision-audit:not([hidden]) {
+  --audit-color: var(--op-filter);
   margin: 10px 0 14px;
   padding: 11px 13px;
-  border: 1px solid color-mix(in srgb, var(--op-filter) 36%, var(--line));
+  border: 1px solid color-mix(in srgb, var(--audit-color) 36%, var(--line));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--op-filter) 5%, var(--paper));
+  background: color-mix(in srgb, var(--audit-color) 5%, var(--paper));
+}
+.decision-audit[data-kind="merge"] {
+  --audit-color: var(--op-merge);
 }
 .decision-audit-title {
-  color: var(--op-filter);
+  color: var(--audit-color);
   font-weight: 700;
   font-size: 13px;
 }
@@ -891,6 +945,13 @@ p {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
+}
+.decision-audit-group-title {
+  flex-basis: 100%;
+  color: var(--audit-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 .decision-audit-row {
   display: flex;
@@ -907,7 +968,7 @@ p {
 }
 .decision-audit-row:hover,
 .decision-audit-row:focus-visible {
-  border-color: var(--op-filter);
+  border-color: var(--audit-color);
 }
 .decision-audit-value {
   color: var(--muted);

@@ -152,10 +152,10 @@ This tracks retained rows. It does not infer every input cell accessed inside an
 arbitrary predicate. External side effects of a user callback are the caller's
 responsibility.
 
-### case_when, filter_by, and coalesce
+### Explicit and compound decisions
 
 ```python
-from framechoreo import col
+from framechoreo import col, where
 
 status = frame.case_when(
     "status",
@@ -167,6 +167,11 @@ status = frame.case_when(
 )
 selected = status.filter_by("sales", op="ge", value=col("target"))
 effective = frame.coalesce("effective", ["sales", "forecast_sales"], default=0)
+rule = (where("sales", "ge", col("target")) & where("region", "in", ["North", "South"])) | ~where(
+    "priority", "eq", False
+)
+selected = frame.filter_by(rule)
+labelled = frame.case_when("route", condition=rule, then="Fast lane", otherwise="Review")
 ```
 
 `case_when` adds a column by testing one existing `column`. `filter_by` retains
@@ -181,12 +186,36 @@ row in `filter_by`. This follows nullable-boolean filtering while preserving
 the reason. For an arbitrary callable or mask, use `filter_rows`; callback
 dependencies are not guessed.
 
+`where(column, op, value)` creates an immutable `Condition`. Combine conditions
+with `&` (all), `|` (any), and `~` (not); Python's `and`/`or` are rejected to
+prevent accidental truth testing. `filter_by(rule)` and
+`case_when(..., condition=rule)` accept the tree while the original single-column
+forms remain available. Clauses are evaluated as pandas nullable booleans, with
+its three-valued AND/OR/NOT results. **All clauses are evaluated**; there is no
+short-circuiting, so each recorded condition cell really was read. A tree has
+at most 32 comparisons and depth 8. `in` accepts an ordered sequence of at most
+1,000 scalar candidates, including an empty sequence. `between` accepts two
+inclusive bounds; each can be a literal or `col("bound_field")`. pandas determines
+whether a missing membership or range comparison becomes false or missing.
+For trees built with `where`, each atomic comparison outcome is recorded. The
+browser shows those checks separately from the combined result and verifies
+that applying AND/OR/NOT to them yields the recorded final outcome. The
+inspector also shows the truth-value formula, so a `NOT` clause's effect is
+visible without treating an atomic check as the final decision.
+
 The chosen branch's cell is a **value input**; comparison cells are **control
 inputs**. A literal branch has no invented source value. `filter_by` records a
 `true`/`false`/`missing` outcome for every input row, including removed rows.
 Use `filtered.filter_decision(input_row)` with the original zero-based row
 position to inspect the decision in Python. The player lists excluded rows,
 distinguishes false and missing comparisons, and links back to the input row.
+`filtered.condition_breakdown(input_row)` (also available on a `case_when`
+result) returns detached `{"column", "op", "outcome"}` entries for atomic
+comparisons before enclosing NOT/AND/OR operators. The final result remains
+available through `filter_decision` or the recorded `case_when` outcome.
+For a compound rule, the audit shows the first three checked fields of each
+excluded row and the complete field count. The inspector retains repeated
+control uses when the same field appears in multiple clauses.
 
 `coalesce` checks named columns from left to right, choosing the first non-missing
 cell. Tested cells are control inputs; only the chosen cell is a value input.
@@ -216,7 +245,7 @@ average = running.window(
 and partitions rows by one or more keys, including missing keys. The current
 row order is the calculation order; this method does not sort dates. `periods`
 is a positive row offset for `lag`/`diff`; `size` is a positive number of rows
-for the two rolling operations. Fixed rolling windows default to
+for the four rolling operations. Fixed rolling windows default to
 `min_periods=size`; an explicit value from zero through `size` is accepted.
 `lag` accepts any supported scalar column. Other operations require a numeric,
 non-boolean column. Actual results and dtype follow pandas' corresponding
@@ -259,6 +288,18 @@ row uses the right key. Otherwise the right key is matching context,
 not another copy of the output value. A right-hand output cell with no match has
 no source value inputs. Pandas matches null keys with null keys; this is not SQL's
 usual null-join behavior.
+
+`joined.join_audit()` returns a detached dictionary describing both input tables:
+`left_match_counts`, `right_match_counts`, `left_unmatched`, `right_unmatched`,
+`left_fanout`, `right_fanout`, `left_duplicate_keys`,
+`right_duplicate_keys`, and `null_key_output_rows`. The last list uses output
+row positions; the other position lists refer to their original input table.
+Unmatched inputs include rows omitted by an inner join and rows retained without
+a partner by an outer join. Match counts count actual paired output rows, so a
+one-to-many expansion has a left count above one. The player links the first
+12 rows of each nonempty audit category to the recorded input table and keeps
+both complete inputs available. Older story payloads without audit metadata
+remain readable; this method applies to newly recorded merge results.
 
 ### group_sum
 
@@ -310,6 +351,29 @@ inputs, so repeated use, empty lineage, and paging behave identically. The defau
 label is `"Group and average"` for `group_mean` and `"Group and count"` for
 `group_count`.
 
+### group_transform
+
+```python
+totals = frame.group_transform("team_total", by="team", value="amount", op="sum", dropna=False)
+average = frame.group_transform("team_average", by="team", value="amount", op="mean", dropna=False)
+```
+
+This adds one field while preserving every original row and index label. `op`
+is `sum`, `mean`, `min`, `max`, `count`, or `nunique`. `sum` uses `min_count=1`
+unless an explicit nonnegative integer is supplied; other reducers reject a
+`min_count` argument. Sum/mean/min/max require numeric, non-boolean values;
+count/nunique accept any supported scalar column. `dropna` explicitly controls
+whether rows with missing grouping keys receive a metric or a missing result.
+`sort=False` and `observed=True` are fixed because the original row order is
+preserved. Pandas computes each result and dtype.
+
+Each repeated metric traces the group's non-missing candidate value cells.
+Grouping-key cells are distinct control inputs; an excluded row has no group
+value input and retains its own missing key as control. Group numbers and colors
+continue through subsequent row-preserving steps. A group broadcast can multiply
+the number of explicit references, so this operation raises `CaptureLimitError`
+above 250,000 value/control references rather than silently sampling them.
+
 For text cells, the player distinguishes empty strings and whitespace-only strings
 with a small label. These values use JSON-style quoting in the table and inspector,
 so tabs and newlines are visible. The displayed type description distinguishes an
@@ -342,7 +406,7 @@ immediately. The player can clear its current selection, and uses a lookup set f
 highlights while keeping repeated origins in the displayed provenance list.
 `explain_controls` returns the current step's deciding source-cell uses separately
 from `explain`'s value inputs. It applies to `case_when`, `filter_by`, `coalesce`,
-and window calculations that record controls. Other steps return an
+`window`, and `group_transform`. Other steps return an
 empty tuple; in particular, it does not infer dependencies inside an arbitrary
 `filter_rows` callback. The browser lists at most 24 immediate decision inputs
 in one view, with their input table and row. Python can return all raw control

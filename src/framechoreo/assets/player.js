@@ -218,6 +218,7 @@
         melt: "Melt",
         pivot: "Pivot",
         aggregate: "Summarize",
+        group_transform: "Group metric",
       };
       const japanese = {
         source: "入力",
@@ -247,6 +248,7 @@
         melt: "縦長にする",
         pivot: "横長にする",
         aggregate: "複数指標の集計",
+        group_transform: "各行にグループ指標",
       };
       if (language === "ja") Object.assign(names, japanese);
       const chapter = scene.step.presentation?.chapter;
@@ -371,8 +373,10 @@
     const origins = el("div", "origins"),
       originPager = el("div", "origin-pager"),
       decisionInputs = el("div", "decision-inputs"),
+      clausePanel = el("div", "clause-panel"),
       explanation = el("div", "explanation");
     decisionInputs.hidden = true;
+    clausePanel.hidden = true;
     const clearSelection = button(
       tx("Clear selection", "選択を解除"),
       () => {
@@ -392,6 +396,8 @@
         origins.replaceChildren();
         decisionInputs.replaceChildren();
         decisionInputs.hidden = true;
+        clausePanel.replaceChildren();
+        clausePanel.hidden = true;
         lineagePath.replaceChildren();
         originPager.replaceChildren();
         explanation.textContent = "";
@@ -424,6 +430,7 @@
       selectionLegend,
       lineagePath,
       decisionInputs,
+      clausePanel,
       origins,
       originPager,
       explanation,
@@ -627,6 +634,8 @@
       origins.replaceChildren();
       decisionInputs.replaceChildren();
       decisionInputs.hidden = true;
+      clausePanel.replaceChildren();
+      clausePanel.hidden = true;
       lineagePath.replaceChildren();
       originPager.replaceChildren();
       try {
@@ -641,6 +650,16 @@
         }
         const details = model.cellExplanation(steps, { step, row, column }, language);
         const controls = model.controlInputs(steps, { step, row, column });
+        const selectedStep = steps.get(step);
+        if (
+          selectedStep.parameters.clause_outcomes &&
+          (selectedStep.operation === "filter_by" ||
+            (selectedStep.operation === "case_when" && column === selectedStep.parameters.name))
+        ) {
+          const inputRow =
+            selectedStep.operation === "filter_by" ? selectedStep.rows[row].parents[0].row : row;
+          renderClausePanel(clausePanel, selectedStep, inputRow);
+        }
         if (controls.length) {
           decisionInputs.hidden = false;
           decisionInputs.append(
@@ -700,6 +719,37 @@
     function reveal(node, block = "center") {
       node.focus({ preventScroll: true });
       node.scrollIntoView({ block, behavior: "auto" });
+    }
+    function renderClausePanel(container, step, inputRow) {
+      const clauses = model.conditionBreakdown(step, inputRow);
+      if (!clauses.length) return;
+      container.hidden = false;
+      container.append(
+        el("div", "decision-title", tx("EACH CHECK BEFORE COMBINATION", "組み合わせる前の各条件")),
+      );
+      for (const clause of clauses) {
+        const chip = el(
+          "span",
+          "clause-chip",
+          clause.column +
+            " " +
+            clause.op +
+            " → " +
+            tx(
+              clause.outcome,
+              clause.outcome === "true" ? "成立" : clause.outcome === "false" ? "不成立" : "欠損",
+            ),
+        );
+        chip.dataset.outcome = clause.outcome;
+        container.append(chip);
+      }
+      container.append(
+        el(
+          "div",
+          "clause-formula",
+          tx("Combined: ", "組み合わせ: ") + model.conditionFormula(step, inputRow, language),
+        ),
+      );
     }
     function findBoardCell(target) {
       return [...board.querySelectorAll(".cell")].find(
@@ -1081,6 +1131,17 @@
             ),
           ),
         );
+      else if (scene.kind === "group_transform")
+        legend.append(
+          legendItem(
+            "data-kind",
+            "group",
+            tx(
+              "Matching group colors show where the repeated metric came from. Select a value for every candidate.",
+              "同じ色の行にグループ指標を繰り返します。値を選ぶと候補の全行を確認できます。",
+            ),
+          ),
+        );
       else if (["group", "sum", "mean", "count", "aggregate"].includes(scene.kind)) {
         legend.append(
           legendItem(
@@ -1112,11 +1173,18 @@
     }
     function renderDecisionAudit(scene) {
       decisionAudit.replaceChildren();
-      decisionAudit.hidden = scene.kind !== "filter_by" || Boolean(state.inspection);
+      decisionAudit.hidden =
+        !["filter_by", "merge"].includes(scene.kind) || Boolean(state.inspection);
       if (decisionAudit.hidden) return;
+      decisionAudit.dataset.kind = scene.kind;
+      if (scene.kind === "merge") {
+        renderJoinAudit(scene);
+        return;
+      }
       const outcome = scene.step.parameters.outcomes,
         source = steps.get(scene.step.parents[0]),
         condition = scene.step.parameters.condition,
+        fields = [...new Set(model.conditionFields(condition, source.columns))],
         excluded = outcome.flatMap((result, row) => (result === "true" ? [] : [{ result, row }])),
         failed = outcome.filter((result) => result === "false").length,
         missing = outcome.filter((result) => result === "missing").length;
@@ -1132,16 +1200,35 @@
           ),
         ),
       );
+      if (scene.step.parameters.clause_outcomes)
+        decisionAudit.append(
+          el(
+            "p",
+            "decision-audit-summary",
+            tx(
+              "Individual checks below are shown before AND, OR, and NOT; each row's final decision appears first.",
+              "下の個別判定は AND・OR・NOT で組み合わせる前の結果です。各行の最終判定を先に表示しています。",
+            ),
+          ),
+        );
       const list = el("div", "decision-audit-list");
       for (const item of excluded.slice(0, 12)) {
-        const cell = source.rows[item.row].cells[source.columns.indexOf(condition.column)];
+        const targetColumn = fields[0];
+        const checked =
+          fields
+            .slice(0, 3)
+            .map((column) => {
+              const cell = source.rows[item.row].cells[source.columns.indexOf(column)];
+              return column + " = " + displayValue(cell);
+            })
+            .join(" · ") + (fields.length > 3 ? " · +" + (fields.length - 3) : "");
         const action = button(
           "",
           () =>
             inspectStep(source.id, {
               step: source.id,
               row: item.row,
-              column: condition.column,
+              column: targetColumn,
             }),
           "decision-audit-row",
         );
@@ -1154,8 +1241,27 @@
               ? tx("Comparison missing", "比較結果が欠損")
               : tx("Condition false", "条件不成立"),
           ),
-          el("span", "decision-audit-value", condition.column + " = " + displayValue(cell)),
+          el("span", "decision-audit-value", checked),
         );
+        if (scene.step.parameters.clause_outcomes) {
+          const clauses = model.conditionBreakdown(scene.step, item.row);
+          action.append(
+            el(
+              "span",
+              "decision-clause-summary",
+              tx("Checks: ", "各条件: ") +
+                clauses
+                  .map((part) => part.column + " " + part.op + " → " + part.outcome)
+                  .join(" · "),
+            ),
+            el(
+              "span",
+              "decision-clause-summary",
+              tx("Combined: ", "組み合わせ: ") +
+                model.conditionFormula(scene.step, item.row, language),
+            ),
+          );
+        }
         list.append(action);
       }
       decisionAudit.append(list);
@@ -1174,6 +1280,107 @@
         button(
           tx("Inspect all source rows", "元の全行を見る"),
           () => inspectStep(source.id, null, true),
+          "text-button",
+        ),
+      );
+    }
+    function renderJoinAudit(scene) {
+      const audit = scene.step.parameters.audit;
+      if (!audit) {
+        decisionAudit.hidden = true;
+        return;
+      }
+      const p = scene.step.parameters,
+        left = steps.get(scene.step.parents[0]),
+        right = steps.get(scene.step.parents[1]);
+      decisionAudit.setAttribute("aria-label", tx("Join input audit", "結合入力の監査"));
+      decisionAudit.append(
+        el("div", "decision-audit-title", tx("What happened to each input", "各入力行の結合結果")),
+        el(
+          "p",
+          "decision-audit-summary",
+          tx(
+            audit.left_unmatched.length +
+              " unmatched left · " +
+              audit.right_unmatched.length +
+              " unmatched right · " +
+              audit.left_fanout.length +
+              " left rows expanded · " +
+              audit.null_key_output_rows.length +
+              " missing-key matches",
+            "左の不一致" +
+              audit.left_unmatched.length +
+              "行 · 右の不一致" +
+              audit.right_unmatched.length +
+              "行 · 左の複製" +
+              audit.left_fanout.length +
+              "行 · 欠損キーの一致" +
+              audit.null_key_output_rows.length +
+              "件",
+          ),
+        ),
+      );
+      const groups = [
+        ["left_unmatched", left, p.left_on[0], tx("Left without a partner", "一致相手のない左行")],
+        [
+          "right_unmatched",
+          right,
+          p.right_on[0],
+          tx("Right without a partner", "一致相手のない右行"),
+        ],
+        ["left_fanout", left, p.left_on[0], tx("Left rows expanded", "複数行に広がった左行")],
+        ["right_fanout", right, p.right_on[0], tx("Right rows expanded", "複数行に広がった右行")],
+        ["left_duplicate_keys", left, p.left_on[0], tx("Repeated left keys", "重複した左キー")],
+        ["right_duplicate_keys", right, p.right_on[0], tx("Repeated right keys", "重複した右キー")],
+      ];
+      for (const [kind, source, column, title] of groups) {
+        const positions = audit[kind];
+        if (!positions.length) continue;
+        const list = el("div", "decision-audit-list");
+        list.append(el("div", "decision-audit-group-title", title + " · " + positions.length));
+        for (const row of positions.slice(0, 12)) {
+          const cell = source.rows[row].cells[source.columns.indexOf(column)];
+          const action = button(
+            "",
+            () =>
+              inspectStep(source.id, {
+                step: source.id,
+                row,
+                column,
+              }),
+            "decision-audit-row",
+          );
+          action.dataset.auditKind = kind;
+          action.append(
+            el("strong", "", model.tableLabel(data, source) + " · row " + (row + 1)),
+            el("span", "decision-audit-value", column + " = " + displayValue(cell)),
+          );
+          list.append(action);
+        }
+        if (positions.length > 12)
+          list.append(el("span", "muted", tx("First 12 shown", "先頭12行を表示")));
+        decisionAudit.append(list);
+      }
+      if (audit.null_key_output_rows.length)
+        decisionAudit.append(
+          el(
+            "p",
+            "decision-audit-summary",
+            tx(
+              "pandas matched missing join keys. Select the result or source tables to inspect them.",
+              "pandas は欠損した結合キー同士も一致させます。結果か元の表で確認できます。",
+            ),
+          ),
+        );
+      decisionAudit.append(
+        button(
+          tx("Inspect left input", "左の入力表を見る"),
+          () => inspectStep(left.id, null, true),
+          "text-button",
+        ),
+        button(
+          tx("Inspect right input", "右の入力表を見る"),
+          () => inspectStep(right.id, null, true),
           "text-button",
         ),
       );
@@ -1284,9 +1491,16 @@
       const aggregate = ["sum", "mean", "count", "aggregate"].includes(scene.kind),
         transfer =
           aggregate ||
-          ["merge", "melt", "pivot", "calculate", "case_when", "coalesce", "window"].includes(
-            scene.kind,
-          ),
+          [
+            "merge",
+            "melt",
+            "pivot",
+            "calculate",
+            "case_when",
+            "coalesce",
+            "window",
+            "group_transform",
+          ].includes(scene.kind),
         flows = [],
         sources = new Map(),
         targets = new Map();
@@ -1300,7 +1514,9 @@
               ? [scene.step.parameters.value_name]
               : scene.kind === "pivot"
                 ? scene.step.parameters.output_columns
-                : ["calculate", "case_when", "coalesce", "window"].includes(scene.kind)
+                : ["calculate", "case_when", "coalesce", "window", "group_transform"].includes(
+                      scene.kind,
+                    )
                   ? [scene.step.parameters.name]
                   : scene.table.columns;
           for (const column of columns) {
@@ -1309,7 +1525,11 @@
               if (scene.kind !== "merge" || ref.step === scene.step.parents[1]) total++;
             destinations.push({
               refs,
-              group: aggregate ? row.position : null,
+              group: aggregate
+                ? row.position
+                : scene.kind === "group_transform"
+                  ? scene.step.parameters.row_groups[row.position]
+                  : null,
               target: findBoardCell({ step: scene.table.id, row: row.position, column }),
             });
           }
@@ -1627,6 +1847,7 @@
         mean: "平均",
         count: "件数",
         aggregate: "集計",
+        group_transform: "グループ指標",
         sort: "並べ替え",
         select: "列選択",
         rename: "名前変更",
@@ -1651,6 +1872,7 @@
         case_when: "DECISION",
         coalesce: "FALLBACK",
         window: "WINDOW",
+        group_transform: "GROUP METRIC",
       };
       operation.textContent =
         language === "ja"
@@ -1713,8 +1935,9 @@
               "." +
               (scene.step.parameters.unmatched_left_rows || 0
                 ? " " +
-                  scene.step.parameters.unmatched_left_rows +
-                  " output rows have no left-side match."
+                  count(scene.step.parameters.unmatched_left_rows, "output row") +
+                  (scene.step.parameters.unmatched_left_rows === 1 ? " has" : " have") +
+                  " no left-side match."
                 : "");
       }
       if (["group", "sum", "mean", "count", "aggregate"].includes(scene.kind)) {
@@ -1754,6 +1977,21 @@
           "Rows are used in their current order. Sort first for a chronological result; inspect a result for exact window members.",
           "現在の行順で計算します。時系列なら先に並べ替えてください。結果のセルから対象行を確認できます。",
         );
+      if (scene.kind === "group_transform") {
+        const p = scene.step.parameters;
+        note = tx(
+          "Each row keeps its original identity while receiving its group's " +
+            p.op +
+            ". Missing-key exclusions: " +
+            p.excluded_rows.length +
+            ".",
+          "元の行を残したまま、グループの" +
+            p.op +
+            "を各行へ付けます。欠損キーによる除外: " +
+            p.excluded_rows.length +
+            "行。",
+        );
+      }
       if (scene.kind === "melt")
         note = tx(
           "Values from " +
@@ -1871,6 +2109,7 @@
           "case_when",
           "coalesce",
           "window",
+          "group_transform",
         ].includes(scene.kind) &&
         workbench.mode === "table"
       ) {
