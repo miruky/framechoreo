@@ -84,6 +84,19 @@
           .replace(/\u2028/g, "\\u2028")
           .replace(/\u2029/g, "\\u2029")
       : cell.display;
+  const displayTolerance = (cell) => {
+    if (!cell) return tx("none", "なし");
+    if (cell.type !== "duration") return displayValue(cell);
+    const match = /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/.exec(cell.value);
+    if (!match) return displayValue(cell);
+    const units = language === "ja" ? ["日", "時間", "分", "秒"] : ["d", "h", "min", "s"];
+    const parts = match
+      .slice(1)
+      .flatMap((part, i) =>
+        part && Number(part) ? [part + (language === "ja" ? "" : " ") + units[i]] : [],
+      );
+    return parts.join(" ") || tx("0 s", "0秒");
+  };
   const typeDescription = (cell) =>
     blankKind(cell) === "empty"
       ? tx("empty string", "空文字")
@@ -195,6 +208,7 @@
         filter: "Filter",
         filter_by: "Decision filter",
         merge: "Join",
+        merge_asof: "Nearby join",
         group: "Group",
         sum: "Sum",
         mean: "Mean",
@@ -204,6 +218,7 @@
         rename: "Rename",
         calculate: "Calculate",
         case_when: "Choose",
+        case_select: "Ordered cases",
         coalesce: "Fallback",
         window: "Window",
         drop_missing: "Drop missing",
@@ -219,12 +234,14 @@
         pivot: "Pivot",
         aggregate: "Summarize",
         group_transform: "Group metric",
+        rank_within: "Group rank",
       };
       const japanese = {
         source: "入力",
         filter: "抽出",
         filter_by: "条件で抽出",
         merge: "結合",
+        merge_asof: "近い時刻で結合",
         group: "グループ",
         sum: "合計",
         mean: "平均",
@@ -234,6 +251,7 @@
         rename: "名前を変える",
         calculate: "計算",
         case_when: "条件で選ぶ",
+        case_select: "優先順に分岐",
         coalesce: "最初の値を選ぶ",
         window: "窓計算",
         drop_missing: "欠損行を除く",
@@ -249,6 +267,7 @@
         pivot: "横長にする",
         aggregate: "複数指標の集計",
         group_transform: "各行にグループ指標",
+        rank_within: "グループ内順位",
       };
       if (language === "ja") Object.assign(names, japanese);
       const chapter = scene.step.presentation?.chapter;
@@ -660,6 +679,8 @@
             selectedStep.operation === "filter_by" ? selectedStep.rows[row].parents[0].row : row;
           renderClausePanel(clausePanel, selectedStep, inputRow);
         }
+        if (selectedStep.operation === "case_select" && column === selectedStep.parameters.name)
+          renderCasePanel(clausePanel, selectedStep, row);
         if (controls.length) {
           decisionInputs.hidden = false;
           decisionInputs.append(
@@ -748,6 +769,39 @@
           "div",
           "clause-formula",
           tx("Combined: ", "組み合わせ: ") + model.conditionFormula(step, inputRow, language),
+        ),
+      );
+    }
+    function renderCasePanel(container, step, row) {
+      const selection = model.caseSelection(step, row, language);
+      if (!selection) return;
+      container.hidden = false;
+      container.append(
+        el("div", "decision-title", tx("CASES IN PRIORITY ORDER", "優先順位どおりの分岐")),
+      );
+      for (const branch of selection.cases) {
+        const chip = el(
+          "span",
+          "clause-chip",
+          tx("Case ", "分岐 ") +
+            (branch.index + 1) +
+            ": " +
+            branch.condition +
+            " · " +
+            branch.formula +
+            (selection.selected === branch.index ? tx(" · selected", " · 選択") : ""),
+        );
+        chip.dataset.outcome = branch.outcome;
+        if (selection.selected === branch.index) chip.dataset.selected = "true";
+        container.append(chip);
+      }
+      container.append(
+        el(
+          "div",
+          "clause-formula",
+          selection.selected === null
+            ? tx("No true case → default value", "成立した分岐なし → 既定値")
+            : tx("First true case → ", "最初に成立した分岐 → ") + (selection.selected + 1),
         ),
       );
     }
@@ -972,8 +1026,9 @@
       const sameReference = previous?.dataset.step === scene.step.id;
       const wasOpen = sameReference && previous.open;
       reference.replaceChildren();
-      dataStage.classList.toggle("with-reference", scene.kind === "merge" && !state.inspection);
-      if (scene.kind !== "merge" || state.inspection) return;
+      const joined = ["merge", "merge_asof"].includes(scene.kind);
+      dataStage.classList.toggle("with-reference", joined && !state.inspection);
+      if (!joined || state.inspection) return;
       const right = steps.get(scene.step.parents[1]);
       const dock = el("section", "source-dock"),
         cards = el("div", "source-cards"),
@@ -1120,7 +1175,18 @@
             ),
           ),
         );
-      else if (["case_when", "coalesce", "window"].includes(scene.kind))
+      else if (scene.kind === "merge_asof")
+        legend.append(
+          legendItem(
+            "data-kind",
+            "merge",
+            tx(
+              "Blue cards move from the selected nearby right row. Unmatched values have no invented source.",
+              "選ばれた右側の近い行から青い値が移動します。不一致の値に架空の入力元は作りません。",
+            ),
+          ),
+        );
+      else if (["case_when", "case_select", "coalesce", "window"].includes(scene.kind))
         legend.append(
           legendItem(
             "data-kind",
@@ -1139,6 +1205,17 @@
             tx(
               "Matching group colors show where the repeated metric came from. Select a value for every candidate.",
               "同じ色の行にグループ指標を繰り返します。値を選ぶと候補の全行を確認できます。",
+            ),
+          ),
+        );
+      else if (scene.kind === "rank_within")
+        legend.append(
+          legendItem(
+            "data-kind",
+            "group",
+            tx(
+              "Colored groups compare their non-missing candidates. Select a rank to see tied inputs.",
+              "同じ色のグループで欠損でない候補を比較します。順位を選ぶと同順位の入力も見られます。",
             ),
           ),
         );
@@ -1174,11 +1251,15 @@
     function renderDecisionAudit(scene) {
       decisionAudit.replaceChildren();
       decisionAudit.hidden =
-        !["filter_by", "merge"].includes(scene.kind) || Boolean(state.inspection);
+        !["filter_by", "merge", "merge_asof"].includes(scene.kind) || Boolean(state.inspection);
       if (decisionAudit.hidden) return;
       decisionAudit.dataset.kind = scene.kind;
       if (scene.kind === "merge") {
         renderJoinAudit(scene);
+        return;
+      }
+      if (scene.kind === "merge_asof") {
+        renderAsOfAudit(scene);
         return;
       }
       const outcome = scene.step.parameters.outcomes,
@@ -1385,6 +1466,124 @@
         ),
       );
     }
+    function renderAsOfAudit(scene) {
+      const p = scene.step.parameters,
+        audit = p.audit,
+        left = steps.get(scene.step.parents[0]),
+        right = steps.get(scene.step.parents[1]),
+        matched = audit.matched_right_rows.length - audit.left_unmatched.length;
+      decisionAudit.setAttribute("aria-label", tx("Nearby match audit", "近傍結合の監査"));
+      decisionAudit.append(
+        el(
+          "div",
+          "decision-audit-title",
+          tx("Which nearby row was selected?", "どの近い行を選んだか"),
+        ),
+        el(
+          "p",
+          "decision-audit-summary",
+          tx(
+            matched +
+              " matched · " +
+              audit.left_unmatched.length +
+              " unmatched events · " +
+              audit.right_unused.length +
+              " unused right rows · " +
+              audit.right_reused.length +
+              " reused right rows",
+            matched +
+              "行が一致 · 左の不一致" +
+              audit.left_unmatched.length +
+              "行 · 未使用の右行" +
+              audit.right_unused.length +
+              "行 · 再利用した右行" +
+              audit.right_reused.length +
+              "行",
+          ),
+        ),
+      );
+      const groups = [
+        ["left_unmatched", left, tx("No nearby right row", "近い右行なし")],
+        ["right_unused", right, tx("Right rows never selected", "一度も選ばれない右行")],
+        ["right_reused", right, tx("Right rows selected repeatedly", "複数回選ばれた右行")],
+      ];
+      for (const [kind, source, title] of groups) {
+        const positions = audit[kind];
+        if (!positions.length) continue;
+        const list = el("div", "decision-audit-list");
+        list.append(el("div", "decision-audit-group-title", title + " · " + positions.length));
+        for (const row of positions.slice(0, 12)) {
+          const cell = source.rows[row].cells[source.columns.indexOf(p.on)];
+          const action = button(
+            "",
+            () =>
+              inspectStep(source.id, {
+                step: source.id,
+                row,
+                column: p.on,
+              }),
+            "decision-audit-row",
+          );
+          action.dataset.asofKind = kind;
+          action.append(
+            el("strong", "", model.tableLabel(data, source) + " · row " + (row + 1)),
+            el("span", "decision-audit-value", p.on + " = " + displayValue(cell)),
+          );
+          list.append(action);
+        }
+        decisionAudit.append(list);
+      }
+      if (matched) {
+        const list = el("div", "decision-audit-list");
+        list.append(
+          el("div", "decision-audit-group-title", tx("Selected pairs", "選ばれた組み合わせ")),
+        );
+        let shown = 0;
+        audit.matched_right_rows.forEach((rightRow, leftRow) => {
+          if (rightRow === null || shown >= 12) return;
+          shown++;
+          const action = button(
+            "",
+            () =>
+              inspectStep(right.id, {
+                step: right.id,
+                row: rightRow,
+                column: p.on,
+              }),
+            "decision-audit-row",
+          );
+          action.dataset.asofKind = "pair";
+          action.append(
+            el(
+              "strong",
+              "",
+              tx("Left ", "左 ") + (leftRow + 1) + " → " + tx("Right ", "右 ") + (rightRow + 1),
+            ),
+            el(
+              "span",
+              "decision-audit-value",
+              displayValue(left.rows[leftRow].cells[left.columns.indexOf(p.on)]) +
+                " → " +
+                displayValue(right.rows[rightRow].cells[right.columns.indexOf(p.on)]),
+            ),
+          );
+          list.append(action);
+        });
+        decisionAudit.append(list);
+      }
+      decisionAudit.append(
+        button(
+          tx("Inspect left input", "左の入力表を見る"),
+          () => inspectStep(left.id, null, true),
+          "text-button",
+        ),
+        button(
+          tx("Inspect right input", "右の入力表を見る"),
+          () => inspectStep(right.id, null, true),
+          "text-button",
+        ),
+      );
+    }
     function replayMotion() {
       if (
         replaying ||
@@ -1493,13 +1692,16 @@
           aggregate ||
           [
             "merge",
+            "merge_asof",
             "melt",
             "pivot",
             "calculate",
             "case_when",
+            "case_select",
             "coalesce",
             "window",
             "group_transform",
+            "rank_within",
           ].includes(scene.kind),
         flows = [],
         sources = new Map(),
@@ -1514,20 +1716,30 @@
               ? [scene.step.parameters.value_name]
               : scene.kind === "pivot"
                 ? scene.step.parameters.output_columns
-                : ["calculate", "case_when", "coalesce", "window", "group_transform"].includes(
-                      scene.kind,
-                    )
+                : [
+                      "calculate",
+                      "case_when",
+                      "case_select",
+                      "coalesce",
+                      "window",
+                      "group_transform",
+                      "rank_within",
+                    ].includes(scene.kind)
                   ? [scene.step.parameters.name]
                   : scene.table.columns;
           for (const column of columns) {
             const refs = row.cell_parents[column] || [];
             for (const ref of refs)
-              if (scene.kind !== "merge" || ref.step === scene.step.parents[1]) total++;
+              if (
+                !["merge", "merge_asof"].includes(scene.kind) ||
+                ref.step === scene.step.parents[1]
+              )
+                total++;
             destinations.push({
               refs,
               group: aggregate
                 ? row.position
-                : scene.kind === "group_transform"
+                : ["group_transform", "rank_within"].includes(scene.kind)
                   ? scene.step.parameters.row_groups[row.position]
                   : null,
               target: findBoardCell({ step: scene.table.id, row: row.position, column }),
@@ -1548,7 +1760,7 @@
             ),
           ),
         );
-        if (scene.kind === "merge") {
+        if (["merge", "merge_asof"].includes(scene.kind)) {
           for (const source of reference.querySelectorAll(".source-cell")) {
             if (visibleCell(source))
               sources.set(
@@ -1571,11 +1783,12 @@
           const to = target.getBoundingClientRect();
           for (const ref of refs) {
             if (
-              (scene.kind === "merge" && ref.step !== scene.step.parents[1]) ||
+              (["merge", "merge_asof"].includes(scene.kind) &&
+                ref.step !== scene.step.parents[1]) ||
               flows.length >= 48
             )
               continue;
-            const source = (scene.kind === "merge" ? sources : oldCells).get(
+            const source = (["merge", "merge_asof"].includes(scene.kind) ? sources : oldCells).get(
               model.cellKey(ref.step, ref.row, ref.column),
             );
             if (source) flows.push({ source, ref, target, to, group });
@@ -1771,7 +1984,7 @@
       table.setAttribute("aria-rowcount", String(tableData.rows.length + 1));
       table.setAttribute("aria-colcount", String(shownColumns.length + 1));
       const geometry = layout(scene, rows);
-      const rightId = scene.kind === "merge" ? scene.step.parents[1] : null;
+      const rightId = ["merge", "merge_asof"].includes(scene.kind) ? scene.step.parents[1] : null;
       for (const entry of geometry.items) {
         if (entry.band) {
           const band = el("div", "group-band", entry.label);
@@ -1848,11 +2061,13 @@
         count: "件数",
         aggregate: "集計",
         group_transform: "グループ指標",
+        rank_within: "グループ順位",
         sort: "並べ替え",
         select: "列選択",
         rename: "名前変更",
         calculate: "計算",
         case_when: "条件選択",
+        case_select: "優先分岐",
         coalesce: "優先値選択",
         window: "窓計算",
         drop_missing: "欠損行除外",
@@ -1870,9 +2085,12 @@
       const englishBadges = {
         filter_by: "FILTER",
         case_when: "DECISION",
+        case_select: "CASES",
         coalesce: "FALLBACK",
         window: "WINDOW",
         group_transform: "GROUP METRIC",
+        rank_within: "GROUP RANK",
+        merge_asof: "NEARBY JOIN",
       };
       operation.textContent =
         language === "ja"
@@ -1940,6 +2158,27 @@
                   " no left-side match."
                 : "");
       }
+      if (scene.kind === "merge_asof") {
+        const p = scene.step.parameters;
+        note = tx(
+          count(p.audit.left_unmatched.length, "left row") +
+            " found no " +
+            p.direction +
+            " match. Tolerance: " +
+            displayTolerance(p.tolerance) +
+            "; exact matches " +
+            (p.allow_exact_matches ? "allowed" : "excluded") +
+            ".",
+          p.audit.left_unmatched.length +
+            "行は" +
+            p.direction +
+            "方向に一致がありません。許容距離: " +
+            displayTolerance(p.tolerance) +
+            "。同時刻の一致: " +
+            (p.allow_exact_matches ? "許可" : "除外") +
+            "。",
+        );
+      }
       if (["group", "sum", "mean", "count", "aggregate"].includes(scene.kind)) {
         const gp = scene.step.parameters;
         note =
@@ -1967,6 +2206,11 @@
           "Each row chooses then or otherwise. Missing comparisons choose otherwise; inspect a cell for both input types.",
           "各行で then または otherwise を選びます。比較が欠損のときは otherwise です。セルで入力の二種類を確認できます。",
         );
+      if (scene.kind === "case_select")
+        note = tx(
+          "Every case is checked in order; the first true one supplies the value. Missing checks continue to later cases.",
+          "分岐を順に調べ、最初に成立したものの値を使います。欠損の条件は次へ進みます。",
+        );
       if (scene.kind === "coalesce")
         note = tx(
           "Columns are checked from left to right. The first present value moves into the result; missing candidates remain decision inputs.",
@@ -1990,6 +2234,19 @@
             "を各行へ付けます。欠損キーによる除外: " +
             p.excluded_rows.length +
             "行。",
+        );
+      }
+      if (scene.kind === "rank_within") {
+        const p = scene.step.parameters;
+        note = tx(
+          "Ranks use " +
+            p.method +
+            " tie handling within each colored group. " +
+            (p.ascending ? "Lower values rank first." : "Higher values rank first."),
+          "同じ色のグループで" +
+            p.method +
+            "方式の同順位処理を使います。" +
+            (p.ascending ? "小さい値を先にします。" : "大きい値を先にします。"),
         );
       }
       if (scene.kind === "melt")
@@ -2099,6 +2356,7 @@
       else if (
         [
           "merge",
+          "merge_asof",
           "sum",
           "mean",
           "count",
@@ -2107,9 +2365,11 @@
           "pivot",
           "calculate",
           "case_when",
+          "case_select",
           "coalesce",
           "window",
           "group_transform",
+          "rank_within",
         ].includes(scene.kind) &&
         workbench.mode === "table"
       ) {

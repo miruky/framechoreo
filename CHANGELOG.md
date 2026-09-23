@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0rc4 — Unpublished candidate
+
+- Add ordered multi-branch decisions with first-true priority, explicit missing-check behavior, per-branch outcomes, and separate value and decision inputs.
+- Add sorted as-of joins with backward/forward/nearest matching, grouping, tolerance and exact-match controls, selected-right-row lineage, and unused/reused-input audits.
+- Add per-group or global numeric ranks with five tie methods, explicit candidate values, and a reference budget.
+- Show branch order, selected nearby matches, and rank candidates in the player; add complete examples and Python, browser, and cross-language verification.
+
 ## 1.0.0rc3 — Unpublished candidate
 
 - Add join audits for unmatched left/right inputs, match multiplicity, duplicate keys, and pandas missing-key matches, with links back to source rows.

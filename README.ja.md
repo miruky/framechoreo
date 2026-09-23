@@ -12,7 +12,7 @@
 
 ## インストール
 
-1.0.0rc3のローカル候補版です。まだ公開していません。
+1.0.0rc4のローカル候補版です。まだ公開していません。
 Python 3.11以上で、ソースのルートから実行します。
 
 ```sh
@@ -23,7 +23,7 @@ python examples/sales_story.py
 配布用wheelから入れる場合は次のとおりです。
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc3-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc4-py3-none-any.whl
 ```
 
 同じ版番号の未公開wheelを以前に導入している場合は、上のコマンドに
@@ -58,11 +58,16 @@ python -m pip install dist/framechoreo-1.0.0rc3-py3-none-any.whl
 上下限の範囲も明示できます。欠損を含む判定はpandasの三値論理を使います。
 `condition_breakdown(元の行位置)` で、AND/OR/NOTを組み合わせる前の各比較結果も
 確認できます。画面の除外行と値の詳細にも、個別の判定結果を表示します。
+`case_select()`では条件を優先順に並べ、最初に成立した分岐の値を使います。
+欠損した判定は次の分岐へ進み、各分岐の結果と選択した値の入力元を表示します。
 
 `merge()`の結果で `join_audit()` を呼ぶと、左右で相手が見つからなかった行、
 複数行に広がった入力、重複キー、欠損キー同士の一致を確認できます。
 `group_transform()`はグループの合計・平均・最小・最大・件数・ユニーク値数を、
 元の各行を残したまま付けます。値の候補とグループ判定キーは分けて追跡できます。
+`merge_asof()`は時刻などの昇順キーで、前・後・最も近い右行を選びます。
+`asof_audit()`で選ばれなかった行や再利用された右行を確認できます。
+`rank_within()`は同順位の方式を選び、グループ内順位の候補をたどれます。
 
 `window()` では現在の行順で、グループ別の前行値・差分・累計合計・累積最小/最大・
 移動合計/平均/最小/最大を説明できます。日時順の分析なら先に `sort_values()` を使ってください。
@@ -73,6 +78,9 @@ python examples/decision_window_workflow.py
 python examples/compound_conditions_workflow.py
 python examples/join_audit_workflow.py
 python examples/group_transform_workflow.py
+python examples/ordered_cases_workflow.py
+python examples/asof_workflow.py
+python examples/rank_workflow.py
 ```
 
 累計では説明用の入力参照が急増するため、1工程あたり25万参照を超える場合は

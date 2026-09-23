@@ -82,14 +82,23 @@ def main() -> None:
             "tests/player-join-audit.test.cjs",
             "tests/player-group-transform.test.cjs",
             "tests/player-compound-conditions.test.cjs",
+            "tests/player-ordered-cases.test.cjs",
+            "tests/player-asof.test.cjs",
+            "tests/player-rank.test.cjs",
             "tests/test_decisions_windows.py",
             "tests/test_join_audit.py",
             "tests/test_group_transform.py",
             "tests/test_compound_conditions.py",
+            "tests/test_case_select.py",
+            "tests/test_asof.py",
+            "tests/test_rank_within.py",
             "tests/make_decision_fixture.py",
             "tests/make_join_audit_fixture.py",
             "tests/make_group_transform_fixture.py",
             "tests/make_compound_fixture.py",
+            "tests/make_ordered_cases_fixture.py",
+            "tests/make_asof_fixture.py",
+            "tests/make_rank_fixture.py",
             "tests/fixtures/retail.json",
             "tests/fixtures/reshape.json",
             "tests/fixtures/decisions.json",
@@ -97,6 +106,9 @@ def main() -> None:
             "tests/fixtures/join_audit.json",
             "tests/fixtures/group_transform.json",
             "tests/fixtures/compound_conditions.json",
+            "tests/fixtures/ordered_cases.json",
+            "tests/fixtures/asof.json",
+            "tests/fixtures/rank.json",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -112,6 +124,9 @@ def main() -> None:
             "examples/join_audit_workflow.py",
             "examples/group_transform_workflow.py",
             "examples/compound_conditions_workflow.py",
+            "examples/ordered_cases_workflow.py",
+            "examples/asof_workflow.py",
+            "examples/rank_workflow.py",
             "docs/v1.md",
             "docs/analysis.md",
             "docs/api.md",
@@ -219,6 +234,23 @@ catalog = join_story.table(pd.DataFrame({"key":["a","c"],"kind":["x","y"]}))
 joined_audit = orders.merge(catalog,on="key",how="inner",validate="one_to_one")
 assert joined_audit.join_audit()["right_unmatched"] == [1]
 assert 'Join input audit' in join_story.to_html(result=joined_audit)
+ordered = input_frame.case_select(
+    "tier", cases=[(where("sales", "ge", 25), "high"),
+                   (where("target", "eq", 15), "middle")], otherwise="basic"
+)
+assert ordered.to_pandas()["tier"].tolist() == ["basic", "middle", "high"]
+assert ordered.case_decision(1)["selected_case"] == 1
+near_story = DataStory()
+left_near = near_story.table(pd.DataFrame({"time":[1,3],"event":["a","b"]}))
+right_near = near_story.table(pd.DataFrame({"time":[2],"reading":[9]}))
+near = left_near.merge_asof(right_near,on="time",direction="backward")
+assert near.asof_audit()["matched_right_rows"] == [None,0]
+assert [o.value for o in near.explain(1,"reading")] == [9]
+rank_story = DataStory()
+rank_source = rank_story.table(pd.DataFrame({"g":["one"]*3,"v":[10,10,20]}))
+ranked = rank_source.rank_within("rank",by="g",value="v",method="dense")
+assert ranked.to_pandas()["rank"].tolist() == [2.,2.,1.]
+assert [o.row for o in ranked.explain(0,"rank")] == [0,1,2]
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
@@ -228,6 +260,9 @@ print(json.dumps({
     "decision_result_rows": len(filtered.to_pandas()),
     "compound_result_rows": len(selected.to_pandas()),
     "group_metric_rows": len(metric.to_pandas()),
+    "ordered_case_rows": len(ordered.to_pandas()),
+    "asof_rows": len(near.to_pandas()),
+    "rank_rows": len(ranked.to_pandas()),
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

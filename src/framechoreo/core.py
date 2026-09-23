@@ -19,7 +19,7 @@ from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 from .profile import profile_frame
 
-VERSION = "1.0.0rc3"
+VERSION = "1.0.0rc4"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1466,6 +1466,95 @@ class StoryFrame:
             },
         )
 
+    def case_select(
+        self,
+        name: str,
+        *,
+        cases: Sequence[tuple[Condition, Any]],
+        otherwise: Any = None,
+        label: str = "Choose the first matching case",
+    ) -> StoryFrame:
+        """Select the first true condition; missing checks continue to later cases.
+
+        All conditions are evaluated as recorded inputs. A selected literal has
+        no source value cell; column replacements use ``col("field")``.
+        """
+        df = self.to_pandas()
+        if not isinstance(name, str) or not name.strip() or name in df.columns:
+            raise ValueError("name must be a new nonempty column name")
+        validate_text(name)
+        if not isinstance(cases, Sequence) or isinstance(cases, (str, bytes)):
+            raise ValueError("cases must be an ordered sequence of condition/value pairs")
+        if not 1 <= len(cases) <= 16:
+            raise ValueError("cases must contain 1 through 16 branches")
+        branches = list(cases)
+        counter = [0]
+        records = []
+        condition_fields = []
+        branch_values = []
+        for branch in branches:
+            if not isinstance(branch, (tuple, list)) or len(branch) != 2:
+                raise ValueError("Each case must be (Condition, value)")
+            condition, replacement = branch
+            if not isinstance(condition, Condition):
+                raise ValueError("Each case requires an explicit Condition")
+            predicate, fields, outcomes, clauses = _evaluate_condition(df, condition, count=counter)
+            operand, source_column, literal = _operand(replacement, df.columns, allow_missing=True)
+            records.append(
+                {
+                    "condition": predicate,
+                    "value": operand,
+                    "outcomes": outcomes,
+                    "clause_outcomes": clauses,
+                }
+            )
+            condition_fields.extend(fields)
+            branch_values.append((source_column, literal))
+        default_record, default_column, default_literal = _operand(
+            otherwise, df.columns, allow_missing=True
+        )
+        selected_cases: list[int | None] = []
+        selected_values = []
+        value_refs = []
+        control_refs = []
+        for row in range(len(df)):
+            chosen = next(
+                (i for i, branch in enumerate(records) if branch["outcomes"][row] == "true"),
+                None,
+            )
+            selected_cases.append(chosen)
+            source_column, literal = (
+                branch_values[chosen] if chosen is not None else (default_column, default_literal)
+            )
+            selected_values.append(df[source_column].array[row] if source_column else literal)
+            value_refs.append(
+                (_CellRef(self.step_id, row, source_column),) if source_column else ()
+            )
+            control_refs.append(
+                tuple(_CellRef(self.step_id, row, field) for field in condition_fields)
+            )
+        df[name] = pd.Series(selected_values, index=df.index).array
+        original = self._snapshot.frame.columns
+        return self._story._add(
+            df,
+            name="Ordered cases",
+            operation="case_select",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {**{c: (_CellRef(self.step_id, i, c),) for c in original}, name: value_refs[i]}
+                for i in range(len(df))
+            ),
+            cell_controls=tuple({name: control_refs[i]} for i in range(len(df))),
+            parameters={
+                "name": name,
+                "cases": records,
+                "otherwise": default_record,
+                "selected_cases": selected_cases,
+            },
+        )
+
     def coalesce(
         self,
         name: str,
@@ -1826,6 +1915,90 @@ class StoryFrame:
             parameters=parameters,
         )
 
+    def rank_within(
+        self,
+        name: str,
+        *,
+        value: str,
+        by: str | Sequence[str] | None = None,
+        method: str = "dense",
+        ascending: bool = False,
+        label: str = "Rank values within each group",
+    ) -> StoryFrame:
+        """Rank recorded numeric values while retaining tie-policy candidates."""
+        df = self.to_pandas()
+        if not isinstance(name, str) or not name.strip() or name in df.columns:
+            raise ValueError("name must be a new nonempty column name")
+        validate_text(name)
+        _keys([value], df.columns)
+        keys = [] if by is None else _keys(by, df.columns)
+        if value in keys:
+            raise ValueError("value must differ from grouping keys")
+        if method not in ("average", "min", "max", "dense", "first"):
+            raise ValueError("Unsupported rank tie method")
+        if not isinstance(ascending, bool):
+            raise ValueError("ascending must be a boolean")
+        if not pd.api.types.is_numeric_dtype(df[value].dtype) or pd.api.types.is_bool_dtype(
+            df[value].dtype
+        ):
+            raise UnsupportedDataError("rank_within requires numeric, non-boolean values")
+        if keys:
+            grouped = df.groupby(keys, sort=False, dropna=False, observed=True)
+            calculated = grouped[value].rank(method=method, ascending=ascending, na_option="keep")
+            ids = grouped.ngroup().to_numpy()
+        else:
+            calculated = df[value].rank(method=method, ascending=ascending, na_option="keep")
+            ids = np.zeros(len(df), dtype=int)
+        groups_by_id: dict[int, list[int]] = {}
+        for position, group_id in enumerate(ids):
+            groups_by_id.setdefault(int(group_id), []).append(position)
+        groups = list(groups_by_id.values())
+        row_groups: list[int | None] = [None] * len(df)
+        inputs: list[tuple[_CellRef, ...]] = [()] * len(df)
+        controls: list[tuple[_CellRef, ...]] = [()] * len(df)
+        reference_count = 0
+        for group_index, members in enumerate(groups):
+            candidates = [i for i in members if pd.notna(df[value].array[i])]
+            candidate_set = set(candidates)
+            value_refs = tuple(_CellRef(self.step_id, i, value) for i in candidates)
+            key_refs = tuple(_CellRef(self.step_id, i, key) for i in candidates for key in keys)
+            for i in members:
+                row_groups[i] = group_index
+                if i in candidate_set:
+                    inputs[i] = value_refs
+                    controls[i] = key_refs
+                else:
+                    controls[i] = tuple(_CellRef(self.step_id, i, key) for key in keys) + (
+                        _CellRef(self.step_id, i, value),
+                    )
+                reference_count += len(inputs[i]) + len(controls[i])
+                if reference_count > 250_000:
+                    raise CaptureLimitError("Rank exceeds 250,000 provenance references")
+        df[name] = calculated.array
+        original = self._snapshot.frame.columns
+        return self._story._add(
+            df,
+            name="Ranked rows",
+            operation="rank_within",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {**{c: (_CellRef(self.step_id, i, c),) for c in original}, name: inputs[i]}
+                for i in range(len(df))
+            ),
+            cell_controls=tuple({name: controls[i]} for i in range(len(df))),
+            parameters={
+                "name": name,
+                "by": keys,
+                "value": value,
+                "method": method,
+                "ascending": ascending,
+                "groups": groups,
+                "row_groups": row_groups,
+            },
+        )
+
     def filter_rows(
         self,
         predicate: Callable[[pd.DataFrame], Any] | Any,
@@ -2011,6 +2184,130 @@ class StoryFrame:
         step = self._snapshot
         if step.operation != "merge":
             raise ValueError("join_audit requires a merge result")
+        return copy.deepcopy(step.parameters["audit"])
+
+    def merge_asof(
+        self,
+        right: StoryFrame,
+        *,
+        on: str,
+        by: str | Sequence[str] | None = None,
+        direction: str = "backward",
+        tolerance: Any = None,
+        allow_exact_matches: bool = True,
+        suffixes: tuple[str, str] = ("_x", "_y"),
+        label: str = "Match the nearest earlier row",
+    ) -> StoryFrame:
+        """Record a sorted pandas as-of join with exact positional right matches."""
+        if not isinstance(right, StoryFrame) or right._story is not self._story:
+            raise ValueError("Both tables must belong to the same story")
+        if direction not in ("backward", "forward", "nearest"):
+            raise ValueError("direction must be backward, forward, or nearest")
+        if not isinstance(allow_exact_matches, bool):
+            raise ValueError("allow_exact_matches must be a boolean")
+        if (
+            not isinstance(suffixes, (tuple, list))
+            or len(suffixes) != 2
+            or not all(isinstance(s, str) for s in suffixes)
+        ):
+            raise ValueError("suffixes must contain two strings")
+        left_df, right_df = self.to_pandas(), right.to_pandas()
+        _keys([on], left_df.columns)
+        _keys([on], right_df.columns)
+        keys = [] if by is None else _keys(by, left_df.columns)
+        if on in keys:
+            raise ValueError("The ordered key must differ from grouping keys")
+        if keys:
+            _keys(keys, right_df.columns)
+        if not left_df[on].is_monotonic_increasing or not right_df[on].is_monotonic_increasing:
+            raise ValueError("Both inputs must be sorted by the ordered key")
+        if len(left_df) > self._story.max_rows:
+            raise CaptureLimitError("As-of join result exceeds max_rows")
+        tolerance_cell = None if tolerance is None else encode_cell(tolerance)
+        if tolerance_cell is not None and tolerance_cell["type"] == "missing":
+            raise ValueError("tolerance must not be missing")
+        options = dict(
+            on=on,
+            by=keys or None,
+            direction=direction,
+            tolerance=tolerance,
+            allow_exact_matches=allow_exact_matches,
+            suffixes=suffixes,
+        )
+        left_marker, right_marker = object(), object()
+        matching_keys = [on, *keys]
+        left_map, right_map = left_df[matching_keys].copy(), right_df[matching_keys].copy()
+        left_map[left_marker] = np.arange(len(left_map))
+        right_map[right_marker] = np.arange(len(right_map))
+        mapping = pd.merge_asof(left_map, right_map, **options)
+        output = pd.merge_asof(left_df, right_df, **options)
+        if len(mapping) != len(output) or len(output) != len(left_df):
+            raise UnsupportedDataError("Could not align the as-of result with its source rows")
+        overlap = (set(left_df.columns) & set(right_df.columns)) - set(matching_keys)
+        row_parents, cell_parents, cell_controls = [], [], []
+        matches: list[int | None] = []
+        right_usage = [0] * len(right_df)
+        for li, ri in zip(mapping[left_marker].array, mapping[right_marker].array, strict=True):
+            li = int(li)
+            ri = None if pd.isna(ri) else int(ri)
+            matches.append(ri)
+            parents = [_RowRef(self.step_id, li)]
+            if ri is not None:
+                parents.append(_RowRef(right.step_id, ri))
+                right_usage[ri] += 1
+            row_parents.append(tuple(parents))
+            cells = {}
+            controls = {}
+            match_keys = tuple(
+                [_CellRef(self.step_id, li, c) for c in matching_keys]
+                + (
+                    [_CellRef(right.step_id, ri, c) for c in matching_keys]
+                    if ri is not None
+                    else []
+                )
+            )
+            for c in left_df.columns:
+                out = c + suffixes[0] if c in overlap else c
+                cells[out] = (_CellRef(self.step_id, li, c),)
+            for c in right_df.columns:
+                if c not in matching_keys:
+                    out = c + suffixes[1] if c in overlap else c
+                    cells[out] = (_CellRef(right.step_id, ri, c),) if ri is not None else ()
+                    controls[out] = match_keys
+            cell_parents.append(cells)
+            cell_controls.append(controls)
+        audit = {
+            "matched_right_rows": matches,
+            "left_unmatched": [i for i, match in enumerate(matches) if match is None],
+            "right_usage_counts": right_usage,
+            "right_unused": [i for i, count in enumerate(right_usage) if count == 0],
+            "right_reused": [i for i, count in enumerate(right_usage) if count > 1],
+        }
+        return self._story._add(
+            output,
+            name="Nearby matched rows",
+            operation="merge_asof",
+            label=label,
+            parents=(self.step_id, right.step_id),
+            row_parents=tuple(row_parents),
+            cell_parents=tuple(cell_parents),
+            cell_controls=tuple(cell_controls),
+            parameters={
+                "on": on,
+                "by": keys,
+                "direction": direction,
+                "tolerance": tolerance_cell,
+                "allow_exact_matches": allow_exact_matches,
+                "suffixes": list(suffixes),
+                "audit": audit,
+            },
+        )
+
+    def asof_audit(self) -> dict[str, Any]:
+        """Return detached selected-right-row and unused-input information."""
+        step = self._snapshot
+        if step.operation != "merge_asof":
+            raise ValueError("asof_audit requires a merge_asof result")
         return copy.deepcopy(step.parameters["audit"])
 
     def _group_keys_and_value(
@@ -2316,6 +2613,18 @@ class StoryFrame:
             {"column": leaf["column"], "op": leaf["op"], "outcome": states[input_row]}
             for leaf, states in zip(leaves, clauses, strict=True)
         )
+
+    def case_decision(self, row: int) -> dict[str, Any]:
+        """Return a detached selected-case index and all ordered case outcomes."""
+        step = self._snapshot
+        if step.operation != "case_select":
+            raise ValueError("case_decision requires a case_select result")
+        if isinstance(row, bool) or not isinstance(row, int) or not 0 <= row < len(step.frame):
+            raise IndexError("row is an output row position")
+        return {
+            "selected_case": step.parameters["selected_cases"][row],
+            "outcomes": [branch["outcomes"][row] for branch in step.parameters["cases"]],
+        }
 
     def explain_page(
         self, row: int, column: str, *, offset: int = 0, limit: int = 50

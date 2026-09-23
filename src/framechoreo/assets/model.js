@@ -162,6 +162,61 @@
     };
     return render(step.parameters.condition) + " → " + names[step.parameters.outcomes[inputRow]];
   }
+  function caseSelection(step, row, language = "en") {
+    if (
+      step.operation !== "case_select" ||
+      !Number.isSafeInteger(row) ||
+      row < 0 ||
+      row >= step.rows.length
+    )
+      return null;
+    return {
+      selected: step.parameters.selected_cases[row],
+      cases: step.parameters.cases.map((branch, index) => ({
+        index,
+        outcome: branch.outcomes[row],
+        condition: conditionCode(branch.condition),
+        formula: conditionFormula({ parameters: branch }, row, language),
+      })),
+    };
+  }
+  function checkedCondition(
+    p,
+    parent,
+    columns,
+    invalid,
+    counter = { leaves: 0 },
+    requireClauses = false,
+  ) {
+    const fields = conditionFields(p.condition, columns, 0, counter);
+    if (
+      !fields ||
+      !Array.isArray(p.outcomes) ||
+      p.outcomes.length !== parent.rows.length ||
+      p.outcomes.some((outcome) => !["true", "false", "missing"].includes(outcome))
+    )
+      invalid("invalid condition");
+    if (requireClauses && p.clause_outcomes === undefined) invalid("missing comparison outcomes");
+    if (p.clause_outcomes !== undefined) {
+      const leaves = conditionLeaves(p.condition);
+      if (
+        !Array.isArray(p.clause_outcomes) ||
+        p.clause_outcomes.length !== leaves.length ||
+        p.clause_outcomes.some(
+          (states) =>
+            !Array.isArray(states) ||
+            states.length !== parent.rows.length ||
+            states.some((outcome) => !["true", "false", "missing"].includes(outcome)),
+        )
+      )
+        invalid("invalid comparison outcomes");
+      p.outcomes.forEach((outcome, row) => {
+        if (conditionResult(p.condition, p.clause_outcomes, row, { index: 0 }) !== outcome)
+          invalid("inconsistent condition logic");
+      });
+    }
+    return fields;
+  }
   function metrics(step) {
     if (step.operation === "group_agg") return step.parameters.metrics;
     return Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)
@@ -372,32 +427,7 @@
       if (used.size !== parent.rows.length) invalid("pivot omitted an input row");
     }
     if (["case_when", "filter_by"].includes(step.operation)) {
-      const fields = conditionFields(p.condition, columns);
-      if (
-        !fields ||
-        !Array.isArray(p.outcomes) ||
-        p.outcomes.length !== parent.rows.length ||
-        p.outcomes.some((outcome) => !["true", "false", "missing"].includes(outcome))
-      )
-        invalid("invalid condition");
-      if (p.clause_outcomes !== undefined) {
-        const leaves = conditionLeaves(p.condition);
-        if (
-          !Array.isArray(p.clause_outcomes) ||
-          p.clause_outcomes.length !== leaves.length ||
-          p.clause_outcomes.some(
-            (states) =>
-              !Array.isArray(states) ||
-              states.length !== parent.rows.length ||
-              states.some((outcome) => !["true", "false", "missing"].includes(outcome)),
-          )
-        )
-          invalid("invalid comparison outcomes");
-        p.outcomes.forEach((outcome, row) => {
-          if (conditionResult(p.condition, p.clause_outcomes, row, { index: 0 }) !== outcome)
-            invalid("inconsistent condition logic");
-        });
-      }
+      const fields = checkedCondition(p, parent, columns, invalid);
       if (step.operation === "case_when") {
         if (
           !p.name ||
@@ -449,6 +479,48 @@
               invalid("inconsistent filtered value inputs");
         });
       }
+    }
+    if (step.operation === "case_select") {
+      if (
+        !p.name ||
+        columns.includes(p.name) ||
+        !sameList(step.columns, [...columns, p.name]) ||
+        step.rows.length !== parent.rows.length ||
+        !Array.isArray(p.cases) ||
+        p.cases.length < 1 ||
+        p.cases.length > 16 ||
+        !operand(p.otherwise, columns, true) ||
+        !Array.isArray(p.selected_cases) ||
+        p.selected_cases.length !== parent.rows.length
+      )
+        invalid("invalid ordered cases");
+      const counter = { leaves: 0 },
+        allFields = [];
+      p.cases.forEach((branch) => {
+        if (!record(branch) || !operand(branch.value, columns, true))
+          invalid("invalid case replacement");
+        allFields.push(...checkedCondition(branch, parent, columns, invalid, counter, true));
+      });
+      step.rows.forEach((row, i) => {
+        const selected = p.cases.findIndex((branch) => branch.outcomes[i] === "true"),
+          chosen = selected >= 0 ? selected : null,
+          value = chosen === null ? p.otherwise : p.cases[chosen].value;
+        if (
+          p.selected_cases[i] !== chosen ||
+          !sameRefs(row.parents, [{ step: parent.id, row: i }]) ||
+          !record(row.cell_controls) ||
+          !sameList(Object.keys(row.cell_controls), [p.name]) ||
+          !sameRefs(
+            row.cell_controls[p.name],
+            allFields.map((column) => ref(i, column)),
+          ) ||
+          !sameRefs(row.cell_parents[p.name], value.column ? [ref(i, value.column)] : [])
+        )
+          invalid("inconsistent ordered case inputs");
+        for (const column of columns)
+          if (!sameRefs(row.cell_parents[column], [ref(i, column)]))
+            invalid("inconsistent unchanged case value");
+      });
     }
     if (step.operation === "coalesce") {
       if (
@@ -660,6 +732,146 @@
             invalid("inconsistent unchanged grouped metric value");
       });
     }
+    if (step.operation === "merge_asof") {
+      const right = steps.get(step.parents[1]);
+      if (
+        !columns.includes(p.on) ||
+        !right.columns.includes(p.on) ||
+        !namedKeys(p.by, columns, true) ||
+        p.by.some((key) => key === p.on || !right.columns.includes(key)) ||
+        !["backward", "forward", "nearest"].includes(p.direction) ||
+        typeof p.allow_exact_matches !== "boolean" ||
+        (p.tolerance !== null && (!validCell(p.tolerance) || p.tolerance.type === "missing")) ||
+        !Array.isArray(p.suffixes) ||
+        p.suffixes.length !== 2 ||
+        p.suffixes.some((v) => typeof v !== "string") ||
+        !record(p.audit) ||
+        step.rows.length !== parent.rows.length
+      )
+        invalid("invalid as-of join settings");
+      const common = [p.on, ...p.by],
+        overlap = columns.filter((c) => right.columns.includes(c) && !common.includes(c)),
+        expectedColumns = [
+          ...columns.map((c) => (overlap.includes(c) ? c + p.suffixes[0] : c)),
+          ...right.columns
+            .filter((c) => !common.includes(c))
+            .map((c) => (overlap.includes(c) ? c + p.suffixes[1] : c)),
+        ],
+        matches = p.audit.matched_right_rows,
+        usage = Array(right.rows.length).fill(0);
+      if (
+        !sameList(step.columns, expectedColumns) ||
+        !Array.isArray(matches) ||
+        matches.length !== parent.rows.length
+      )
+        invalid("invalid as-of output shape");
+      step.rows.forEach((row, i) => {
+        const ri = matches[i];
+        if (ri !== null && (!Number.isSafeInteger(ri) || ri < 0 || ri >= right.rows.length))
+          invalid("invalid as-of match position");
+        if (ri !== null) usage[ri]++;
+        const expectedParents = [
+          { step: parent.id, row: i },
+          ...(ri === null ? [] : [{ step: right.id, row: ri }]),
+        ];
+        if (!sameRefs(row.parents, expectedParents)) invalid("inconsistent as-of row input");
+        const rightOutputs = right.columns
+          .filter((c) => !common.includes(c))
+          .map((c) => (overlap.includes(c) ? c + p.suffixes[1] : c));
+        if (!record(row.cell_controls) || !sameList(Object.keys(row.cell_controls), rightOutputs))
+          invalid("invalid as-of match controls");
+        const matchControls = [
+          ...common.map((c) => ref(i, c)),
+          ...(ri === null ? [] : common.map((c) => ref(ri, c, right.id))),
+        ];
+        for (const output of rightOutputs)
+          if (!sameRefs(row.cell_controls[output], matchControls))
+            invalid("inconsistent as-of match controls");
+        for (const c of columns) {
+          const output = overlap.includes(c) ? c + p.suffixes[0] : c;
+          if (!sameRefs(row.cell_parents[output], [ref(i, c)]))
+            invalid("inconsistent as-of left value");
+        }
+        for (const c of right.columns) {
+          if (common.includes(c)) continue;
+          const output = overlap.includes(c) ? c + p.suffixes[1] : c;
+          if (!sameRefs(row.cell_parents[output], ri === null ? [] : [ref(ri, c, right.id)]))
+            invalid("inconsistent as-of right value");
+        }
+      });
+      if (
+        !sameList(
+          p.audit.left_unmatched,
+          matches.flatMap((r, i) => (r === null ? [i] : [])),
+        ) ||
+        !sameList(p.audit.right_usage_counts, usage) ||
+        !sameList(
+          p.audit.right_unused,
+          usage.flatMap((n, i) => (n === 0 ? [i] : [])),
+        ) ||
+        !sameList(
+          p.audit.right_reused,
+          usage.flatMap((n, i) => (n > 1 ? [i] : [])),
+        )
+      )
+        invalid("inconsistent as-of audit");
+    }
+    if (step.operation === "rank_within") {
+      if (
+        !p.name ||
+        columns.includes(p.name) ||
+        !columns.includes(p.value) ||
+        !sameList(step.columns, [...columns, p.name]) ||
+        !namedKeys(p.by, columns, true) ||
+        p.by.includes(p.value) ||
+        !["average", "min", "max", "dense", "first"].includes(p.method) ||
+        typeof p.ascending !== "boolean" ||
+        !Array.isArray(p.groups) ||
+        !Array.isArray(p.row_groups) ||
+        p.row_groups.length !== parent.rows.length ||
+        step.rows.length !== parent.rows.length
+      )
+        invalid("invalid ranking settings");
+      const seen = new Set();
+      for (const [groupIndex, members] of p.groups.entries()) {
+        if (!Array.isArray(members) || !members.length) invalid("empty rank group");
+        members.forEach((position, j) => {
+          if (
+            !Number.isSafeInteger(position) ||
+            position < 0 ||
+            position >= parent.rows.length ||
+            seen.has(position) ||
+            (j && position <= members[j - 1]) ||
+            p.row_groups[position] !== groupIndex
+          )
+            invalid("invalid rank membership");
+          seen.add(position);
+        });
+        const candidates = members.filter(
+          (i) => parent.rows[i].cells[columns.indexOf(p.value)].type !== "missing",
+        );
+        for (const position of members) {
+          const row = step.rows[position],
+            present = parent.rows[position].cells[columns.indexOf(p.value)].type !== "missing",
+            valueRefs = present ? candidates.map((i) => ref(i, p.value)) : [],
+            keyRefs = present
+              ? candidates.flatMap((i) => p.by.map((column) => ref(i, column)))
+              : [...p.by.map((column) => ref(position, column)), ref(position, p.value)];
+          if (
+            !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+            !sameRefs(row.cell_parents[p.name], valueRefs) ||
+            !record(row.cell_controls) ||
+            !sameList(Object.keys(row.cell_controls), [p.name]) ||
+            !sameRefs(row.cell_controls[p.name], keyRefs)
+          )
+            invalid("inconsistent rank inputs");
+          for (const column of columns)
+            if (!sameRefs(row.cell_parents[column], [ref(position, column)]))
+              invalid("inconsistent unchanged rank value");
+        }
+      }
+      if (seen.size !== parent.rows.length) invalid("rank omitted rows");
+    }
   }
   function indexStory(data) {
     if (!data || data.format !== "framechoreo.story" || data.schema_version !== 1) {
@@ -682,6 +894,7 @@
       source: 0,
       filter: 1,
       merge: 2,
+      merge_asof: 2,
       group_sum: 1,
       group_mean: 1,
       group_count: 1,
@@ -702,7 +915,9 @@
       concat: -1,
       group_agg: 1,
       group_transform: 1,
+      rank_within: 1,
       case_when: 1,
+      case_select: 1,
       filter_by: 1,
       window: 1,
       coalesce: 1,
@@ -1305,6 +1520,14 @@
               ? "条件が成立し、then の値を選びました。"
               : "条件が成立せず、otherwise の値を選びました。") +
           "値の入力元と判定入力は別に表示します。";
+      } else if (step.operation === "case_select" && reference.column === step.parameters.name) {
+        const chosen = step.parameters.selected_cases[reference.row];
+        text =
+          chosen === null
+            ? "成立した条件がなく、既定値を選びました。欠損の条件は次の分岐へ進みます。"
+            : "条件を上から確認し、最初に成立した" +
+              (chosen + 1) +
+              "番目の値を選びました。各分岐の結果は下に表示します。";
       } else if (step.operation === "filter_by")
         text = "条件を満たした行です。判定に使った入力は、コピーした値の入力元と分けて表示します。";
       else if (step.operation === "group_transform" && reference.column === step.parameters.name)
@@ -1313,6 +1536,15 @@
           : "同じグループの" +
             refs.length +
             "件の非欠損候補から求めた指標を、各行へ繰り返しています。グループ判定のキーは別に表示します。";
+      else if (step.operation === "rank_within" && reference.column === step.parameters.name)
+        text =
+          refs.length === 0
+            ? "現在の値が欠損のため順位も欠損です。元の値とグループキーを判定入力に残しています。"
+            : "同じグループの" +
+              refs.length +
+              "件を比較し、" +
+              step.parameters.method +
+              "方式で順位を決めています。同順位の候補も残しています。";
       else if (step.operation === "window" && reference.column === step.parameters.name) {
         const op = step.parameters.op;
         if (op === "lag" && refs.length === 0)
@@ -1402,6 +1634,11 @@
           "この行と列の組み合わせには元の値セルがありません。表の形を変える際にできた欠損です。";
       else if (step.operation === "merge")
         text = "この結合結果には、条件に一致する側の入力値がありません。";
+      else if (step.operation === "merge_asof" && row.cell_controls?.[reference.column])
+        text =
+          step.parameters.audit.matched_right_rows[reference.row] === null
+            ? "指定した方向・許容距離に合う右側の行がありません。左側の時刻とグループを確認できます。"
+            : "時刻とグループで選ばれた右側の行から値を取りました。照合に使ったキーは判定入力に表示します。";
       else
         text =
           "変換前の入力セルをたどれます。読み取りに失敗して欠損になった場合も、元の文字列を確認できます。";
@@ -1426,6 +1663,28 @@
           " Value inputs and decision inputs are separate.",
       };
     }
+    if (step.operation === "case_select" && reference.column === p.name) {
+      const chosen = p.selected_cases[reference.row];
+      return {
+        text:
+          chosen === null
+            ? "No condition was true, so the default value was selected. Missing checks continued to later cases."
+            : "The first true case was case " +
+              (chosen + 1) +
+              ". Every case was evaluated; its result and deciding inputs are shown separately.",
+      };
+    }
+    if (step.operation === "merge_asof" && row.cell_controls?.[reference.column]) {
+      const match = p.audit.matched_right_rows[reference.row];
+      return {
+        text:
+          match === null
+            ? "No right row matched within the chosen direction, exact-match policy, and tolerance. The left keys are shown as decision inputs."
+            : "Right input row " +
+              (match + 1) +
+              " was selected by the ordered key and group. The compared keys are separate decision inputs.",
+      };
+    }
     if (step.operation === "filter_by")
       return {
         text: "This row passed the condition. Its deciding inputs are separate from its copied value inputs.",
@@ -1439,6 +1698,18 @@
             " considered " +
             row.cell_parents[p.name].length +
             " non-missing group candidates and repeats the metric beside each member. Group keys are separate decision inputs.",
+      };
+    if (step.operation === "rank_within" && reference.column === p.name)
+      return {
+        text:
+          row.cell_parents[p.name].length === 0
+            ? "The current value is missing, so its rank is missing. The missing value and group keys remain decision inputs."
+            : "The " +
+              p.method +
+              " rank compares " +
+              row.cell_parents[p.name].length +
+              " non-missing group candidates, including ties. " +
+              (p.ascending ? "Lower values rank first." : "Higher values rank first."),
       };
     if (step.operation === "window" && reference.column === p.name) {
       const count = row.cell_parents[p.name].length;
@@ -1617,7 +1888,7 @@
       if (!row) return null;
       if (Object.prototype.hasOwnProperty.call(aggregateScene, step.operation))
         return { step: stepId, row: position };
-      if (step.operation === "group_transform") {
+      if (["group_transform", "rank_within"].includes(step.operation)) {
         const group = step.parameters.row_groups[position];
         return group === null ? null : { step: stepId, row: group };
       }
@@ -1630,10 +1901,9 @@
     return null;
   }
   function groupTitle(scene, groupIndex) {
-    const rowPosition =
-      scene.step.operation === "group_transform"
-        ? scene.step.parameters.groups[groupIndex][0]
-        : groupIndex;
+    const rowPosition = ["group_transform", "rank_within"].includes(scene.step.operation)
+      ? scene.step.parameters.groups[groupIndex][0]
+      : groupIndex;
     const row = scene.step.rows[rowPosition];
     return scene.step.parameters.by
       .map((key) => {
@@ -1704,6 +1974,21 @@
         operandCode(p.otherwise) +
         ")"
       );
+    if (scene.kind === "case_select")
+      return (
+        "case_select(" +
+        JSON.stringify(p.name) +
+        ", cases=[" +
+        p.cases
+          .map(
+            (branch) =>
+              "(" + conditionCode(branch.condition) + ", " + operandCode(branch.value) + ")",
+          )
+          .join(", ") +
+        "], otherwise=" +
+        operandCode(p.otherwise) +
+        ")"
+      );
     if (scene.kind === "window")
       return (
         "window(" +
@@ -1735,6 +2020,20 @@
         ", dropna=" +
         (p.dropna ? "True" : "False") +
         (p.min_count === undefined ? "" : ", min_count=" + p.min_count) +
+        ")"
+      );
+    if (scene.kind === "rank_within")
+      return (
+        "rank_within(" +
+        JSON.stringify(p.name) +
+        ", value=" +
+        JSON.stringify(p.value) +
+        ", by=" +
+        JSON.stringify(p.by) +
+        ", method=" +
+        JSON.stringify(p.method) +
+        ", ascending=" +
+        (p.ascending ? "True" : "False") +
         ")"
       );
     if (scene.kind === "coalesce")
@@ -1852,6 +2151,20 @@
         JSON.stringify(p.suffixes || ["_x", "_y"]) +
         ", sort=False)"
       );
+    if (scene.kind === "merge_asof")
+      return (
+        "merge_asof(on=" +
+        JSON.stringify(p.on) +
+        ", by=" +
+        JSON.stringify(p.by) +
+        ", direction=" +
+        JSON.stringify(p.direction) +
+        ", tolerance=" +
+        (p.tolerance === null ? "None" : cellCode(p.tolerance)) +
+        ", allow_exact_matches=" +
+        (p.allow_exact_matches ? "True" : "False") +
+        ")"
+      );
     const group =
       "groupby(" +
       JSON.stringify(p.by) +
@@ -1894,6 +2207,7 @@
     conditionFields,
     conditionBreakdown,
     conditionFormula,
+    caseSelection,
     tableLabel,
     groupTitle,
     orderedRows,

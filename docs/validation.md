@@ -1,4 +1,4 @@
-# Validation scope for 1.0.0rc3
+# Validation scope for 1.0.0rc4
 
 This is an unpublished local candidate checked on macOS on 2026-09-23. It is not a
 claim of universal pandas coverage, cross-browser certification, or demonstrated
@@ -6,7 +6,7 @@ teaching effectiveness. [The 1.0 guide](v1.md) defines the intended surface.
 
 ## Python and pandas
 
-The complete **244-test Python suite** passed in all five local environments:
+The complete **274-test Python suite** passed in all five local environments:
 
 | Python | pandas | NumPy |
 |---|---|---|
@@ -32,14 +32,24 @@ operations, and explicit filtering against pandas. Randomized cases cover nullab
 values and group boundaries across 35 generated cases. A 1,000-row cumulative
 example confirms that the 250,000-reference guard fails without appending a
 partial step. A cross-version regression also checks the exact missing
-representation produced by grouped
-text `shift` on pandas 2.2 and 3.0.
+representation produced by grouped text `shift` on pandas 2.2 and 3.0.
 The rc3 cases cover unmatched inputs on both sides of inner/outer joins,
 one-to-many fanout, null-key matching, row-preserving group metrics,
 all-missing/empty groups, and compound three-valued conditions with range and
 membership clauses. All 27 combinations of three nullable booleans are checked
 against pandas. Group broadcasts fail clearly before 250,000 explicit
 references, with no partial step appended.
+The rc4 cases compare all three as-of directions against pandas, including
+group restrictions, datetime tolerance, exact-match exclusion, a self-join,
+empty inputs, duplicate right timestamps, equidistant matches, and duplicate
+left index labels. Ordered cases cover priority, nullable outcomes, selected
+column values, copied decision reports, invalid
+requests, default column values, and an empty table. Rank tests compare all five
+tie policies in both sort directions with missing values and duplicate indices;
+missing grouping keys are also checked against pandas. Rejected options must
+leave the story unchanged. Global rank and the explicit-reference limit are
+also exercised. A regression
+uses `datetime.timedelta` to keep pandas 2.2 with current NumPy warning-clean.
 
 ## Browser model and controls
 
@@ -52,10 +62,12 @@ It also checks decision inputs separately from value inputs, malformed
 conditional/window/coalesce references, the excluded-row audit, and source-row
 navigation, join audit links, group-colored repeated metrics, and nested
 condition-tree validation. Atomic comparison outcomes are recombined into the
-final decision. **143 JavaScript tests** passed.
+final decision. rc4 adds malformed branch, nearby-join and rank-reference
+checks and verifies their visible inspector and audit controls. **149 JavaScript
+tests** passed.
 Synthetic rectangles test correspondence; they do not measure browser CSS layout.
 
-The Python/JavaScript wire check compares **1,100 value cells, 138 control-source
+The Python/JavaScript wire check compares **1,193 value cells, 174 control-source
 uses**, and a page near the end of 10^18 logical repeated source uses. This is
 a small repeated-reference graph, not 10^18 physical rows. The checks include
 the new operations, schema gaps, reserved metric names, and repeated inputs. No
@@ -63,7 +75,8 @@ tests are skipped to accommodate a result.
 The new decision workflow contributes conditional, fallback, grouped-window,
 and explicit-filter references to this cross-language comparison.
 It also includes rc3 join audits (including a self-join), group transforms,
-and compound condition trees.
+and compound condition trees. rc4 adds ordered cases, near-key matches
+(including a self-join), and grouped ranks.
 
 ## Interactive checks
 
@@ -89,11 +102,21 @@ and value movement. The compound-condition audit displayed all three checked
 fields of each excluded row and the AND/OR/NOT truth-value formula. At 390×844,
 both the join and compound examples
 stayed within a 390-pixel document width.
+For rc4, the in-app Chromium player showed ordered case outcomes, the selected
+third-branch column value and repeated decision inputs. The as-of example showed
+the selected left/right timestamp pairs, one unmatched event, one unused right
+reading, one reused right reading, and a readable three-minute tolerance. A
+selected rank showed both tied candidate scores and separate group-key inputs.
+At 390×844, the ordered-case inspector and nearby-join audit each stayed within
+the 390-pixel document width; wide tables scroll within their own stage.
 
 The notebook check executes the shipped notebook in an isolated kernel, inspects
 its rich-output markup, and shuts the kernel down. The sandboxed player can also be
 checked separately in a browser. A kernel check alone does not verify every notebook
 frontend or screen reader.
+The 50,000-row analysis example also completed, producing eight result rows and
+an 11,187,317-byte self-contained HTML file. This is a smoke run, not a
+performance benchmark for the new rc4 operations.
 
 ## Distribution and scope
 
@@ -103,11 +126,11 @@ virtual environment. The installed smoke test blocks runtime socket connections
 and exercises the README example, a 1,000-row analysis, and cleaning through named
 aggregation, melt, and pivot. The player assets and player-only MIT notice must be
 present in the installed package and HTML output.
-The rc3 fresh-install smoke also executes conditional selection, coalescing,
+The fresh-install smoke also executes conditional selection, coalescing,
 cumulative windows, explicit filtering, compound outcomes, join audits, group
-transforms, and their decision/value provenance with
-runtime socket connections blocked. The checked wheel and sdist hashes are in
-the local `V1拡張3/distribution.json` release evidence.
+transforms, ordered cases, near-key joins, ranks, and their decision/value
+provenance with runtime socket connections blocked. The checked wheel and
+sdist hashes are in the local `V1拡張4/distribution.json` release evidence.
 
 The repository configures Linux/macOS/Windows CI. That remote matrix has **not**
 been run while publication is on hold. Actual GUI checks here cover Chromium;
@@ -117,4 +140,4 @@ limits; these checks do not establish suitability for arbitrary or unbounded dat
 
 Earlier 0.1 measurements and frontend checks are retained in
 [the historical validation record](validation-0.1.md). In particular, its memory
-and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc3.
+and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc4.

@@ -12,8 +12,8 @@ is needed to replay it.
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
-result was made. **1.0.0rc3 is a local release candidate; it has not been published.**
-Operations are explicit and their results follow pandas. [The 1.0 guide](docs/v1.md)
+result was made. **1.0.0rc4 is a local release candidate; it has not been published.**
+Operations are explicit; pandas computes their table and numeric results. [The 1.0 guide](docs/v1.md)
 defines the supported workflow, reader features, and compatibility boundaries.
 
 ## Install
@@ -28,7 +28,7 @@ python -m pip install .
 Or install the prepared wheel:
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc3-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc4-py3-none-any.whl
 ```
 
 If you installed an earlier unreleased wheel with the same version, add
@@ -102,13 +102,16 @@ iframe through `_repr_html_()`.
 | `filter_by(column, op=..., value=...)` | Explicit condition with true/false/missing outcomes for every input row and an excluded-row audit |
 | `where(...)` with `&`, `\|`, `~` | Compose up to 32 comparisons with pandas three-valued logic; supports membership and inclusive ranges |
 | `case_when(name, column=..., op=..., value=..., then=..., otherwise=...)` | Chooses a value while separating the chosen value input from comparison inputs; `col("field")` denotes a column operand |
+| `case_select(name, cases=[...], otherwise=...)` | Checks ordered rules and uses the first true branch; a missing check continues to the next branch |
 | `coalesce(name, [...], default=...)` | Takes the first non-missing field in each row and shows every checked candidate |
 | `window(name, column=..., op=..., by=...)` | Grouped lag/difference, cumulative sum/min/max, and rolling sum/mean/min/max in current row order |
 | `merge(...)` / `join_audit()` | Left/inner/right/outer with validated cardinality; inspect unmatched inputs, fanout, duplicate keys, and missing-key matches |
+| `merge_asof(...)` / `asof_audit()` | Sorted nearby-key join with backward/forward/nearest choices, tolerance, exact-match policy, and selected-right-row audit |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
 | `group_mean(by=..., value=..., dropna=...)` | Numeric non-boolean values; a group with no non-missing values is missing, since pandas skips missing values with no `min_count` to set |
 | `group_count(by=..., value=..., dropna=...)` | Counts non-missing entries of any supported column type per group; this is not the row count, and a fully missing group counts as zero |
 | `group_transform(name, by=..., value=..., op=..., dropna=...)` | Repeat a group's sum/mean/min/max/count/nunique beside each original row with exact candidate inputs |
+| `rank_within(name, value=..., by=..., method=...)` | Rank numeric values globally or per group with five explicit tie methods and candidate provenance |
 | `calculate(name, left=..., op=..., right=...)` | Row-wise add/subtract/multiply/divide with a numeric column or scalar; records actual operands |
 | `sort_values(by, ...)` | Stable sorting with retained positional provenance |
 | `select_columns([...])` / `rename_columns({...})` | Choose, reorder, and rename columns while retaining their inputs |
@@ -222,6 +225,9 @@ python examples/decision_window_workflow.py
 python examples/compound_conditions_workflow.py
 python examples/join_audit_workflow.py
 python examples/group_transform_workflow.py
+python examples/ordered_cases_workflow.py
+python examples/asof_workflow.py
+python examples/rank_workflow.py
 python examples/large_analysis.py --rows 5000
 ```
 

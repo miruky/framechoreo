@@ -15,8 +15,9 @@ categorical dictionaries are copied explicitly because a pandas deep copy can
 still share those buffers. Predicate mutation checks compare exact values.
 
 Filter lineage comes from the accepted boolean mask. Merge lineage comes from
-a key-only pandas merge with positional markers. The public result comes from a
-separate ordinary pandas merge, preserving its column metadata. Group membership
+a key-only pandas merge with positional markers. A nearby join uses a separate
+key-only `merge_asof` with positional markers. The public results come from
+ordinary pandas joins, preserving their column metadata. Group membership
 comes from the native GroupBy object and its group numbers.
 The join's positional correspondence also yields input match counts, unmatched
 rows on either side, one-to-many fanout, duplicate key rows, and missing-key
@@ -33,6 +34,11 @@ retained rows and records every input-row outcome, including removed rows. The
 arbitrary `filter_rows` callback has no inferred control relation. Python
 exposes the current step's decision sources through `explain_controls`; the
 browser displays direct control cells separately.
+`case_select` records every branch's nullable outcome and the first true
+branch index. A missing check continues to the next branch; this explicit
+policy is separate from pandas `Series.case_when`'s nullable-mask behavior.
+Only the selected column operand is a value source. Each declared comparison
+is a control input, including comparisons in branches after the selected one.
 `Condition` trees contain only declared comparisons. They are limited to 32
 atomic comparisons and depth 8, and use pandas nullable-boolean AND/OR/NOT
 semantics. Every clause is evaluated; no Python source string or callback is
@@ -41,6 +47,21 @@ use pandas' own `isin` and `between` results. Atomic comparison outcomes are
 recorded separately. The player checks that their three-valued combination
 matches the final decision; it does not independently recompute pandas' scalar
 comparisons from encoded display values.
+
+An as-of match has one selected right input row or none. The right value's
+lineage points to that selected row. Its control context contains the left
+ordered/group keys and the selected right ordered/group keys. For an unmatched
+left row, only its own keys are available as direct control context. This
+does not enumerate all right candidates that pandas considered or rejected.
+The audit counts each right row's reuse and exposes unused right rows. The
+browser checks these positional relationships but does not recompute pandas'
+distance, tolerance, or tie selection.
+
+`rank_within` delegates numeric ordering and tie handling to pandas. Every
+non-missing value in the row's group is an explicit candidate value; grouping
+keys are control inputs. A missing current value has no rank value source.
+The browser validates recorded group membership and references without
+recomputing numeric ranks from display strings.
 
 For a sum, value-input references omit missing numeric inputs. Row membership,
 grouping keys, and minimum-count settings are retained separately. Repeated
@@ -109,6 +130,9 @@ need cross-language validation before raising this limit.
 and key references can also grow quadratically, so it uses the same 250,000
 explicit-reference bound. It preserves row identity, including duplicate index
 labels, and records excluded missing-key rows separately.
+`rank_within` uses the same bound because every ranked row references its
+group's candidate values. `merge_asof` retains one right-row match per left
+row, so its positional map does not expand the number of output rows.
 
 JSON is a versioned display model; it is not a general pandas round-trip format.
 Self-contained HTML includes the matching player and is the primary sharing format. No external font, CDN, telemetry, API

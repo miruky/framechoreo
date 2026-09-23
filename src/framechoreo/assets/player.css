@@ -320,7 +320,8 @@ p {
 [data-kind="filter_by"] {
   --op-color: var(--op-filter);
 }
-[data-kind="merge"] {
+[data-kind="merge"],
+[data-kind="merge_asof"] {
   --op-color: var(--op-merge);
 }
 [data-kind="group"],
@@ -332,8 +333,12 @@ p {
 [data-kind="group_transform"] {
   --op-color: var(--op-agg);
 }
+[data-kind="rank_within"] {
+  --op-color: var(--op-agg);
+}
 [data-kind="calculate"],
 [data-kind="case_when"],
+[data-kind="case_select"],
 [data-kind="coalesce"],
 [data-kind="window"] {
   --op-color: var(--op-derive);
@@ -341,13 +346,16 @@ p {
 .operation[data-kind="filter"],
 .operation[data-kind="filter_by"],
 .operation[data-kind="merge"],
+.operation[data-kind="merge_asof"],
 .operation[data-kind="group"],
 .operation[data-kind="sum"],
 .operation[data-kind="mean"],
 .operation[data-kind="count"],
 .operation[data-kind="group_transform"],
+.operation[data-kind="rank_within"],
 .operation[data-kind="calculate"],
 .operation[data-kind="case_when"],
+.operation[data-kind="case_select"],
 .operation[data-kind="coalesce"],
 .operation[data-kind="window"] {
   font-weight: 600;
@@ -899,6 +907,12 @@ p {
 .clause-chip[data-outcome="missing"] {
   border-color: color-mix(in srgb, var(--g2) 45%, var(--line));
 }
+.clause-chip[data-selected="true"] {
+  color: var(--ink);
+  border-color: var(--op-derive);
+  background: color-mix(in srgb, var(--op-derive) 13%, var(--paper));
+  font-weight: 700;
+}
 .clause-formula {
   flex-basis: 100%;
   color: var(--ink);
@@ -927,7 +941,8 @@ p {
   border-radius: 8px;
   background: color-mix(in srgb, var(--audit-color) 5%, var(--paper));
 }
-.decision-audit[data-kind="merge"] {
+.decision-audit[data-kind="merge"],
+.decision-audit[data-kind="merge_asof"] {
   --audit-color: var(--op-merge);
 }
 .decision-audit-title {

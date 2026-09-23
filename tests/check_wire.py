@@ -252,6 +252,54 @@ def main():
     selected = chosen.filter_by(rule)
     cases.append((broadcast, [raw, total, chosen, selected]))
 
+    ordered = DataStory()
+    raw = ordered.table(
+        pd.DataFrame(
+            {
+                "score": pd.array([90, 60, None, 10], dtype="Int64"),
+                "vip": [False, True, False, False],
+                "fallback": ["A", "B", "C", "D"],
+            }
+        )
+    )
+    selected = raw.case_select(
+        "tier",
+        cases=[
+            (where("score", "ge", 80), "top"),
+            (where("vip", "eq", True), "vip"),
+            (where("score", "lt", 40), col("fallback")),
+        ],
+        otherwise="standard",
+    )
+    cases.append((ordered, [raw, selected]))
+
+    nearby = DataStory()
+    left = nearby.table(
+        pd.DataFrame({"time": [1, 4, 5], "group": ["a", "a", "b"], "event": ["x", "y", "z"]})
+    )
+    right = nearby.table(
+        pd.DataFrame({"time": [2, 3, 6], "group": ["a", "a", "b"], "reading": [10, 20, 30]})
+    )
+    joined = left.merge_asof(right, on="time", by="group", direction="nearest", tolerance=2)
+    cases.append((nearby, [left, right, joined]))
+
+    self_nearby = DataStory()
+    source = self_nearby.table(pd.DataFrame({"time": [1, 2, 3], "v": [4, 5, 6]}))
+    joined = source.merge_asof(source, on="time", allow_exact_matches=False)
+    cases.append((self_nearby, [source, joined]))
+
+    leaderboard = DataStory()
+    source = leaderboard.table(
+        pd.DataFrame(
+            {
+                "team": ["a", "b", "a", "a"],
+                "score": pd.array([2, 5, 2, None], dtype="Int64"),
+            }
+        )
+    )
+    ranked = source.rank_within("rank", value="score", by="team", method="dense")
+    cases.append((leaderboard, [source, ranked]))
+
     for story, frames in cases:
         checks = []
         for frame in frames:

@@ -217,6 +217,38 @@ For a compound rule, the audit shows the first three checked fields of each
 excluded row and the complete field count. The inspector retains repeated
 control uses when the same field appears in multiple clauses.
 
+### Ordered cases
+
+```python
+route = frame.case_select(
+    "route",
+    cases=[
+        (where("score", "ge", 80), "High score"),
+        (where("vip", "eq", True), "VIP"),
+        (where("score", "lt", 40), col("fallback_route")),
+    ],
+    otherwise="Standard review",
+)
+route.case_decision(0)  # selected_case and every case's outcome
+```
+
+`cases` is an ordered sequence of 1–16 `(Condition, replacement)` pairs. All
+conditions are evaluated, and the first **true** case supplies the value. A
+false or missing case continues to the next one. If none is true, `otherwise`
+is used; it defaults to a missing literal. Strings are literals, and `col()`
+marks a source column. `case_decision(row)` returns a detached zero-based
+selected case index (or `None`) and the ordered true/false/missing outcomes.
+Atomic clause outcomes are also recorded. Across all cases there can be at
+most 32 comparisons, with each condition tree at most depth 8. This explicit
+missing policy is FrameChoreo's contract; do not infer it from pandas
+`Series.case_when`'s handling of nullable masks.
+
+Only the selected column replacement becomes a value input. Every case's
+compared fields become decision inputs, including later cases that were still
+evaluated after an earlier true case. Repeated checks retain repeated input
+uses. The player identifies the selected branch and shows each case in priority
+order alongside the source value.
+
 `coalesce` checks named columns from left to right, choosing the first non-missing
 cell. Tested cells are control inputs; only the chosen cell is a value input.
 When all candidates are missing, it uses the explicit scalar `default` (missing
@@ -301,6 +333,41 @@ one-to-many expansion has a left count above one. The player links the first
 both complete inputs available. Older story payloads without audit metadata
 remain readable; this method applies to newly recorded merge results.
 
+### merge_asof
+
+```python
+from datetime import timedelta
+
+nearby = events.merge_asof(
+    readings,
+    on="time",
+    by="sensor",
+    direction="backward",
+    tolerance=timedelta(minutes=3),
+    allow_exact_matches=False,
+)
+nearby.asof_audit()
+```
+
+Both frames belong to the same story and must already be sorted ascending by
+the shared `on` key. `by` optionally restricts matching to equal shared group
+fields; differently named ordered/group fields and index joins are outside this
+method. `direction` is `backward`, `forward`, or `nearest`. The optional pandas
+`tolerance` and the boolean `allow_exact_matches` control eligibility. pandas
+chooses at most one right row per left row and determines the result's values,
+dtypes, and tie behavior. Invalid sorting or incompatible key/tolerance types
+raise instead of creating a partial step.
+
+`asof_audit()` returns detached `matched_right_rows`, `left_unmatched`,
+`right_usage_counts`, `right_unused`, and `right_reused`. The matched-right list
+has one zero-based right position or `None` per left row. Right value cells trace
+only the selected right input; their decision inputs show the left and selected
+right ordered/group keys. For unmatched rows, only left keys can be shown as
+direct comparison context; the implementation does not claim to enumerate every
+eligible or rejected right candidate. The player offers links to unmatched,
+unused, reused, and selected input rows. It validates positional references
+but does not independently re-run pandas' nearest-key selection in JavaScript.
+
 ### group_sum
 
 ```python
@@ -374,6 +441,22 @@ continue through subsequent row-preserving steps. A group broadcast can multiply
 the number of explicit references, so this operation raises `CaptureLimitError`
 above 250,000 value/control references rather than silently sampling them.
 
+### rank_within
+
+```python
+ranked = frame.rank_within("team_rank", value="score", by="team", method="dense", ascending=False)
+```
+
+`by` is optional; omitting it ranks the whole table. Numeric non-boolean values
+are required. The five tie methods are `average`, `min`, `max`, `dense`, and
+`first`; `dense` and descending order are this wrapper's defaults. pandas
+computes the rank and dtype with missing values kept unranked. Every
+non-missing candidate in the row's group is a value input, including tied
+values; group-key cells are separate decision inputs. A missing current value
+has no rank value input and retains that source value as decision context.
+Group numbers and colors survive subsequent sorting. Explicit provenance is
+bounded at 250,000 references for this operation.
+
 For text cells, the player distinguishes empty strings and whitespace-only strings
 with a small label. These values use JSON-style quoting in the table and inspector,
 so tabs and newlines are visible. The displayed type description distinguishes an
@@ -405,8 +488,9 @@ Duplicate source names receive distinct display labels without changing source I
 immediately. The player can clear its current selection, and uses a lookup set for
 highlights while keeping repeated origins in the displayed provenance list.
 `explain_controls` returns the current step's deciding source-cell uses separately
-from `explain`'s value inputs. It applies to `case_when`, `filter_by`, `coalesce`,
-`window`, and `group_transform`. Other steps return an
+from `explain`'s value inputs. It applies to `case_when`, `case_select`,
+`filter_by`, `coalesce`, `window`, `group_transform`, `merge_asof` right values,
+and `rank_within`. Other steps return an
 empty tuple; in particular, it does not infer dependencies inside an arbitrary
 `filter_rows` callback. The browser lists at most 24 immediate decision inputs
 in one view, with their input table and row. Python can return all raw control
