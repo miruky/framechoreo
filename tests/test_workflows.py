@@ -270,7 +270,7 @@ def test_export_embeds_player_notice_separately_from_customer_content():
     story = DataStory(language="ja")
     story.table(pd.DataFrame({"data": ["Customer-owned text"]}))
     html = story.to_html(compression="none")
-    license_text = (Path(__file__).parents[1] / "LICENSE").read_text().strip()
+    license_text = (Path(__file__).parents[1] / "LICENSE").read_text(encoding="utf-8").strip()
     assert license_text in html
     assert 'id="framechoreo-license"' in html
     assert 'lang="ja"' in html

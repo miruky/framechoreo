@@ -34,7 +34,7 @@ def test_scalar_roundtrip_display_and_script_safety(tmp_path):
     assert "https://" not in text and "http://" not in text
     assert json.loads(s.to_json())["title"] == attack
     path = s.export_html(tmp_path / "out.html")
-    assert path.read_text() == text
+    assert path.read_text(encoding="utf-8") == text
     with pytest.raises(FileExistsError):
         s.export_html(path)
     s.export_html(path, overwrite=True)
@@ -69,5 +69,5 @@ def test_failed_replacement_keeps_existing_file_and_removes_temporary_file(tmp_p
     monkeypatch.setattr(export.os, "replace", fail)
     with pytest.raises(OSError, match="replacement failure"):
         story.export_html(target, overwrite=True)
-    assert target.read_text() == "original bytes"
+    assert target.read_text(encoding="utf-8") == "original bytes"
     assert list(tmp_path.iterdir()) == [target]

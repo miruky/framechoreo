@@ -88,7 +88,7 @@ def test_overwrite_requires_an_actual_boolean(tmp_path):
     target.write_text("keep this file")
     with pytest.raises(ValueError, match="overwrite"):
         story.export_html(target, overwrite="false")
-    assert target.read_text() == "keep this file"
+    assert target.read_text(encoding="utf-8") == "keep this file"
 
 
 def test_invalid_unicode_is_rejected_before_a_snapshot_is_committed():
