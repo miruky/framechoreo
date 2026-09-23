@@ -1,6 +1,6 @@
 # Validation scope for 1.0.0rc6
 
-This is an unpublished local candidate checked on macOS on 2026-09-23. It is not a
+This records pre-publication local checks on macOS on 2026-09-23. It is not a
 claim of universal pandas coverage, cross-browser certification, or demonstrated
 teaching effectiveness. [The 1.0 guide](v1.md) defines the intended surface.
 
@@ -163,16 +163,16 @@ cumulative windows, explicit filtering, compound outcomes, join audits, group
 transforms, ordered cases, near-key joins, ranks, and their decision/value
 provenance, shared group and window references, fractional change, time buckets,
 and reviewed source-column approval with
-runtime socket connections blocked. The checked wheel and sdist hashes are in
-the local `公開準備1/distribution.json` release evidence.
+runtime socket connections blocked. The checked wheel and sdist hashes are kept
+with the local release evidence.
 
 The project dependency audit with pip-audit 2.10.1 reported no known
 vulnerabilities in its resolved pandas, NumPy, python-dateutil, and six versions
 on this date. `npm audit` reported none in the player-test dependencies. These
 database checks are point-in-time findings, not a general security guarantee.
 
-The repository configures Linux/macOS/Windows CI. That remote matrix has **not**
-been run while publication is on hold. Actual GUI checks here cover selected
+The repository configures Linux/macOS/Windows CI. Local checks do not substitute
+for the live GitHub Actions status. Actual GUI checks here cover selected
 Chromium and Safari cases. Firefox, screen-reader use, complete color-contrast
 coverage, and the independent reader study remain outside the evidence.
 The implementation retains snapshots in memory and has finite capture/display

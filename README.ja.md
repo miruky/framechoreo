@@ -17,22 +17,17 @@ HTMLのソースを眺めるのではなく、元ファイルをダウンロー�
 
 ## インストール
 
-1.0.0rc6のローカル候補版です。まだ公開していません。
-Python 3.11以上で、ソースのルートから実行します。
+1.0.0rc6はGitHubで公開するプレビュー版です。正式な1.0やPyPI版ではありません。
+Python 3.11以上で、次のようにソースから導入します。
 
 ```sh
+git clone https://github.com/miruky/framechoreo.git
+cd framechoreo
 python -m pip install .
 python examples/sales_story.py
 ```
 
-配布用wheelから入れる場合は次のとおりです。
-
-```sh
-python -m pip install dist/framechoreo-1.0.0rc6-py3-none-any.whl
-```
-
-同じ版番号の未公開wheelを以前に導入している場合は、上のコマンドに
-`--force-reinstall --no-deps` を追加して入れ替えてください。
+wheelとソース配布物はGitHubのプレビューReleaseにも添付します。PyPIにはまだ登録しません。
 
 `examples/generated/sales.html` をブラウザーで開くと、実際のPython処理から
 生成した説明が再生できます。`classroom.py` は日本語の題材です。

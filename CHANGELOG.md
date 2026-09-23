@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0rc6 — Unpublished candidate
+## 1.0.0rc6 — GitHub preview (2026-09-23)
 
 - Add source-column capture allowlists, source manifests, and an exact source-column approval gate for reviewed JSON/HTML exports.
 - Add pandas-style cleaning and grouped authoring methods backed by existing explicit operations; unsupported pandas behavior still raises rather than inventing provenance.

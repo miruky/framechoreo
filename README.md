@@ -18,27 +18,24 @@ synthetic data and needs no server. On GitHub, download the raw HTML rather than
 viewing its source.
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
-result was made. **1.0.0rc6 is a local release candidate; it has not been published.**
+result was made. **1.0.0rc6 is a GitHub preview, not a stable 1.0 release or a PyPI package.**
 Operations are explicit; pandas computes their table and numeric results. [The 1.0 guide](docs/v1.md)
 defines the supported workflow, reader features, and compatibility boundaries.
 
 ## Install
 
-The first release is being prepared; do not assume it is available on PyPI yet.
-From a source checkout, with Python 3.11 or newer:
+The preview is installed from GitHub, with Python 3.11 or newer:
 
 ```sh
+git clone https://github.com/miruky/framechoreo.git
+cd framechoreo
 python -m pip install .
+python examples/sales_story.py
 ```
 
-Or install the prepared wheel:
-
-```sh
-python -m pip install dist/framechoreo-1.0.0rc6-py3-none-any.whl
-```
-
-If you installed an earlier unreleased wheel with the same version, add
-`--force-reinstall --no-deps` to replace that local installation.
+Open `examples/generated/sales.html` to inspect the result. A checked wheel and
+source distribution are attached to the GitHub preview release; the project has
+not been uploaded to PyPI.
 
 Runtime dependencies are pandas and NumPy. A browser runs the exported player;
 Node.js is only needed for the player-model development tests.

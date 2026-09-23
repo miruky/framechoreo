@@ -1,7 +1,7 @@
-# Release checklist for the unpublished 1.0 candidate
+# Release checklist for the GitHub preview and future PyPI package
 
-The local artifacts are prepared separately from publishing. A successful build
-does not mean a GitHub repository or PyPI project already exists.
+The GitHub source preview and PyPI package release are separate milestones. A
+successful local build does not mean a PyPI project exists.
 
 1. Confirm the project name and inspect the final source diff.
 2. Run Python tests on both supported pandas lines, player-model tests, and lint.
@@ -15,8 +15,8 @@ does not mean a GitHub repository or PyPI project already exists.
 5. Check the distributions for assets, license, docs, tests, and accidental private data.
    Review `export_info()["sources"]` and use source-column approval for any
    non-synthetic story intended for sharing.
-6. Create the public repository only when publication is authorized. Enable its
-   issue reporting and private vulnerability-reporting features as appropriate.
+6. Check Git history and distribution files for personal data before publishing the
+   source on GitHub. Enable issues and private vulnerability reporting.
 7. Run the configured CI on the actual repository before relying on its platform matrix.
    Complete the [reader evaluation protocol](reader-evaluation.md) before claiming
    teaching effectiveness or an accessible stable 1.0 experience.
@@ -90,11 +90,12 @@ and open `examples/notebook.ipynb` in JupyterLab to inspect the embedded control
 
 ## Candidate status
 
-The current version is `1.0.0rc6`; it is a local candidate and has not been uploaded.
+The current version is `1.0.0rc6`, intended as a GitHub preview rather than a
+stable 1.0 or a PyPI release.
 The public Python surface and migration boundaries are in [the 1.0 guide](v1.md).
 Generated HTML carries the bundled player's MIT notice separately from the user's
-content. This does not complete account setup, verified public URLs, a Git-history
-privacy review, remote CI, or installation from a real published release.
+content. A GitHub release does not complete PyPI account setup, publisher
+configuration, or installation from a PyPI-hosted release.
 
 Before changing the candidate version to `1.0.0`, review the recorded verification,
 resolve any remaining release issues, rebuild from that exact source, and run the

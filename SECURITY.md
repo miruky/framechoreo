@@ -2,9 +2,8 @@
 
 ## Supported version
 
-Security fixes target the latest 1.0 release candidate while the project remains
-unpublished. The current local candidate is `1.0.0rc6`; no public support window
-is promised until a release is published.
+Security fixes target the latest GitHub preview. The current candidate is
+`1.0.0rc6`; no response-time guarantee or stable 1.0 support window is promised.
 
 ## Data handling
 
