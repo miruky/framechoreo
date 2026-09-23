@@ -19,7 +19,19 @@ from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 from .profile import profile_frame
 
-VERSION = "1.0.0rc1"
+VERSION = "1.0.0rc2"
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnRef:
+    """Explicitly select a column operand where a string could mean a literal."""
+
+    name: str
+
+
+def col(name: str) -> ColumnRef:
+    """Refer to a column in a conditional value or comparison."""
+    return ColumnRef(_text(name, "column", 100))
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +82,8 @@ class _Step:
     row_parents: tuple[tuple[_RowRef, ...], ...]
     cell_parents: tuple[dict[str, tuple[_CellRef, ...]], ...]
     parameters: dict[str, Any]
+    row_controls: tuple[tuple[_CellRef, ...], ...] = ()
+    cell_controls: tuple[dict[str, tuple[_CellRef, ...]], ...] = ()
 
 
 def _text(value: str, name: str, limit: int = 400) -> str:
@@ -130,6 +144,55 @@ def _row_values(frame: pd.DataFrame) -> Iterator[tuple[Any, ...]]:
     columns = [frame[column].array for column in frame.columns]
     for row in range(len(frame)):
         yield tuple(column[row] for column in columns)
+
+
+def _operand(
+    value: Any, columns: pd.Index, *, allow_missing: bool = False
+) -> tuple[dict[str, Any], str | None, Any]:
+    if isinstance(value, ColumnRef):
+        _keys([value.name], columns)
+        return {"column": value.name}, value.name, None
+    cell = encode_cell(value)
+    if cell["type"] == "missing" and not allow_missing:
+        raise ValueError("Use is_missing or is_not_missing to test missing values")
+    return {"constant": cell}, None, value
+
+
+def _condition(
+    df: pd.DataFrame, column: str, op: str, value: Any
+) -> tuple[dict[str, Any], str | None, list[str]]:
+    _keys([column], df.columns)
+    comparisons = {
+        "eq": operator.eq,
+        "ne": operator.ne,
+        "gt": operator.gt,
+        "ge": operator.ge,
+        "lt": operator.lt,
+        "le": operator.le,
+    }
+    if op in ("is_missing", "is_not_missing"):
+        if value is not None:
+            raise ValueError("Missingness conditions do not accept a comparison value")
+        operand, other_column, target = None, None, None
+        mask = df[column].isna() if op == "is_missing" else df[column].notna()
+    elif op in comparisons:
+        operand, other_column, target = _operand(value, df.columns)
+        if other_column is not None:
+            target = df[other_column]
+        try:
+            mask = comparisons[op](df[column], target)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Condition operands cannot be compared") from exc
+    else:
+        raise ValueError("Unsupported condition operator")
+    try:
+        boolean = pd.array(mask, dtype="boolean")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Condition must produce one boolean per row") from exc
+    if len(boolean) != len(df):
+        raise ValueError("Condition must produce one boolean per row")
+    outcomes = ["missing" if pd.isna(x) else "true" if x else "false" for x in boolean]
+    return {"column": column, "op": op, "value": operand}, other_column, outcomes
 
 
 class DataStory:
@@ -284,6 +347,8 @@ class DataStory:
         row_parents: tuple[tuple[_RowRef, ...], ...] = (),
         cell_parents: tuple[dict[str, tuple[_CellRef, ...]], ...] = (),
         parameters: dict[str, Any] | None = None,
+        row_controls: tuple[tuple[_CellRef, ...], ...] = (),
+        cell_controls: tuple[dict[str, tuple[_CellRef, ...]], ...] = (),
     ) -> StoryFrame:
         if not isinstance(frame, pd.DataFrame):
             raise TypeError("Expected a pandas DataFrame")
@@ -315,6 +380,8 @@ class DataStory:
             row_parents=row_parents,
             cell_parents=cell_parents,
             parameters=copy.deepcopy(parameters or {}),
+            row_controls=row_controls,
+            cell_controls=cell_controls,
         )
         self._steps.append(step)
         self._step_index[step.id] = step
@@ -460,7 +527,7 @@ class DataStory:
     def _row_record(step: _Step, i: int, values: tuple[Any, ...]) -> dict[str, Any]:
         refs = step.row_parents[i] if step.row_parents else ()
         cell_refs = step.cell_parents[i] if step.cell_parents else {}
-        return {
+        record = {
             "id": f"{step.id}:{i}",
             "position": i,
             "cells": [encode_cell(v) for v in values],
@@ -470,6 +537,16 @@ class DataStory:
                 for col, rr in cell_refs.items()
             },
         }
+        if step.row_controls:
+            record["row_controls"] = [
+                {"step": r.step, "row": r.row, "column": r.column} for r in step.row_controls[i]
+            ]
+        if step.cell_controls:
+            record["cell_controls"] = {
+                col: [{"step": r.step, "row": r.row, "column": r.column} for r in rr]
+                for col, rr in step.cell_controls[i].items()
+            }
+        return record
 
     def to_dict(self, *, result: StoryFrame | None = None) -> dict[str, Any]:
         """Return detached display data for the result and its ancestors."""
@@ -1189,6 +1266,311 @@ class StoryFrame:
             parameters={"name": name, "left": left, "op": op, "right": right_record},
         )
 
+    def case_when(
+        self,
+        name: str,
+        *,
+        column: str,
+        op: str,
+        value: Any = None,
+        then: Any,
+        otherwise: Any,
+        label: str = "Choose a value by condition",
+    ) -> StoryFrame:
+        """Choose one value per row and separately record the deciding inputs.
+
+        Strings are literals; use ``col("field")`` for a column operand.
+        A missing comparison selects ``otherwise`` and is recorded as missing.
+        """
+        df = self.to_pandas()
+        if not isinstance(name, str) or not name.strip() or name in df.columns:
+            raise ValueError("name must be a new nonempty column name")
+        validate_text(name)
+        condition, other_column, outcomes = _condition(df, column, op, value)
+        true_record, true_column, true_literal = _operand(then, df.columns, allow_missing=True)
+        false_record, false_column, false_literal = _operand(
+            otherwise, df.columns, allow_missing=True
+        )
+        selected_values = []
+        value_refs = []
+        control_refs = []
+        for i, outcome in enumerate(outcomes):
+            chosen_column, literal = (
+                (true_column, true_literal) if outcome == "true" else (false_column, false_literal)
+            )
+            selected_values.append(df[chosen_column].array[i] if chosen_column else literal)
+            value_refs.append((_CellRef(self.step_id, i, chosen_column),) if chosen_column else ())
+            control_refs.append(
+                tuple(_CellRef(self.step_id, i, c) for c in [column, other_column] if c)
+            )
+        df[name] = pd.Series(selected_values, index=df.index).array
+        original = self._snapshot.frame.columns
+        return self._story._add(
+            df,
+            name="Conditional value",
+            operation="case_when",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {**{c: (_CellRef(self.step_id, i, c),) for c in original}, name: value_refs[i]}
+                for i in range(len(df))
+            ),
+            cell_controls=tuple({name: control_refs[i]} for i in range(len(df))),
+            parameters={
+                "name": name,
+                "condition": condition,
+                "then": true_record,
+                "otherwise": false_record,
+                "outcomes": outcomes,
+            },
+        )
+
+    def coalesce(
+        self,
+        name: str,
+        columns: str | Sequence[str],
+        *,
+        default: Any = None,
+        label: str = "Use the first available value",
+    ) -> StoryFrame:
+        """Pick each row's first non-missing value from ordered columns.
+
+        Every tested cell is a control input; only the selected cell is a
+        value input. ``default`` is an explicit scalar, never a source cell.
+        """
+        df = self.to_pandas()
+        if not isinstance(name, str) or not name.strip() or name in df.columns:
+            raise ValueError("name must be a new nonempty column name")
+        validate_text(name)
+        candidates = _keys(columns, df.columns)
+        default_cell = encode_cell(default)
+        selected_values = []
+        selected_columns: list[str | None] = []
+        value_refs = []
+        control_refs = []
+        for i in range(len(df)):
+            checked = []
+            chosen = None
+            for candidate in candidates:
+                checked.append(_CellRef(self.step_id, i, candidate))
+                if pd.notna(df[candidate].array[i]):
+                    chosen = candidate
+                    break
+            selected_columns.append(chosen)
+            selected_values.append(df[chosen].array[i] if chosen else default)
+            value_refs.append((_CellRef(self.step_id, i, chosen),) if chosen else ())
+            control_refs.append(tuple(checked))
+        df[name] = pd.Series(selected_values, index=df.index).array
+        original = self._snapshot.frame.columns
+        return self._story._add(
+            df,
+            name="First available value",
+            operation="coalesce",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {**{c: (_CellRef(self.step_id, i, c),) for c in original}, name: value_refs[i]}
+                for i in range(len(df))
+            ),
+            cell_controls=tuple({name: control_refs[i]} for i in range(len(df))),
+            parameters={
+                "name": name,
+                "columns": candidates,
+                "default": default_cell,
+                "selected_columns": selected_columns,
+            },
+        )
+
+    def filter_by(
+        self,
+        column: str,
+        *,
+        op: str,
+        value: Any = None,
+        label: str = "Filter by condition",
+    ) -> StoryFrame:
+        """Filter using an explicit condition and retain every input-row outcome."""
+        df = self.to_pandas()
+        condition, other_column, outcomes = _condition(df, column, op, value)
+        selected = [i for i, outcome in enumerate(outcomes) if outcome == "true"]
+        output = df.iloc[selected]
+        return self._story._add(
+            output,
+            name="Filtered by condition",
+            operation="filter_by",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in selected),
+            cell_parents=tuple(
+                {c: (_CellRef(self.step_id, i, c),) for c in df.columns} for i in selected
+            ),
+            row_controls=tuple(
+                tuple(_CellRef(self.step_id, i, c) for c in [column, other_column] if c)
+                for i in selected
+            ),
+            parameters={
+                "condition": condition,
+                "outcomes": outcomes,
+                "selected_rows": selected,
+                "removed_rows": len(df) - len(selected),
+            },
+        )
+
+    def window(
+        self,
+        name: str,
+        *,
+        column: str,
+        op: str,
+        by: str | Sequence[str] | None = None,
+        periods: int = 1,
+        size: int = 3,
+        min_periods: int | None = None,
+        label: str = "Calculate over ordered rows",
+    ) -> StoryFrame:
+        """Record lag, difference, cumulative, or trailing rolling statistics.
+
+        The input order is the current row order; call ``sort_values`` first for
+        chronological work. Explicit per-cell references are limited so an
+        expanding window cannot silently produce an enormous export.
+        """
+        df = self.to_pandas()
+        if not isinstance(name, str) or not name.strip() or name in df.columns:
+            raise ValueError("name must be a new nonempty column name")
+        validate_text(name)
+        _keys([column], df.columns)
+        keys = [] if by is None else _keys(by, df.columns)
+        if column in keys:
+            raise ValueError("The value column must differ from grouping keys")
+        if op not in (
+            "lag",
+            "diff",
+            "cumsum",
+            "cummin",
+            "cummax",
+            "rolling_sum",
+            "rolling_mean",
+            "rolling_min",
+            "rolling_max",
+        ):
+            raise ValueError("Unsupported window operation")
+        if op != "lag" and (
+            not pd.api.types.is_numeric_dtype(df[column].dtype)
+            or pd.api.types.is_bool_dtype(df[column].dtype)
+        ):
+            raise UnsupportedDataError("This window operation requires numeric, non-boolean values")
+        _positive_integer(periods, "periods")
+        _positive_integer(size, "size")
+        if min_periods is not None and (
+            isinstance(min_periods, bool)
+            or not isinstance(min_periods, int)
+            or min_periods < 0
+            or min_periods > size
+        ):
+            raise ValueError("min_periods must be between zero and size")
+        minimum = size if min_periods is None else min_periods
+        if keys:
+            ids = (
+                df.reset_index(drop=True)
+                .groupby(keys, sort=False, dropna=False, observed=True)
+                .ngroup()
+                .to_numpy()
+            )
+        else:
+            ids = np.zeros(len(df), dtype=int)
+        groups_by_id: dict[int, list[int]] = {}
+        for position, group_id in enumerate(ids):
+            groups_by_id.setdefault(int(group_id), []).append(position)
+        groups = list(groups_by_id.values())
+        chunks = []
+        inputs: list[tuple[_CellRef, ...]] = [()] * len(df)
+        controls: list[tuple[_CellRef, ...]] = [()] * len(df)
+        references = 0
+        for positions in groups:
+            series = df[column].iloc[positions].reset_index(drop=True)
+            if op == "lag":
+                # GroupBy.shift preserves pandas' boundary-missing scalar for
+                # object and extension dtypes; per-group concat can change it.
+                calculated = None
+            elif op == "diff":
+                calculated = series.diff(periods)
+            elif op in ("cumsum", "cummin", "cummax"):
+                calculated = getattr(series, op)()
+            else:
+                rolling = series.rolling(size, min_periods=minimum)
+                calculated = getattr(rolling, op.removeprefix("rolling_"))()
+            if calculated is not None:
+                calculated.index = positions
+                chunks.append(calculated)
+            for j, position in enumerate(positions):
+                window_positions = positions[max(0, j - size + 1) : j + 1]
+                if op == "lag":
+                    members = [positions[j - periods]] if j >= periods else []
+                elif op == "diff":
+                    members = [position, positions[j - periods]] if j >= periods else [position]
+                elif op in ("cumsum", "cummin", "cummax"):
+                    members = (
+                        [p for p in positions[: j + 1] if pd.notna(df[column].array[p])]
+                        if pd.notna(df[column].array[position])
+                        else []
+                    )
+                else:
+                    members = [p for p in window_positions if pd.notna(df[column].array[p])]
+                inputs[position] = tuple(_CellRef(self.step_id, p, column) for p in members)
+                missing_candidates = (
+                    [p for p in window_positions if pd.isna(df[column].array[p])]
+                    if op.startswith("rolling_")
+                    else [position]
+                    if op in ("cumsum", "cummin", "cummax") and pd.isna(df[column].array[position])
+                    else []
+                )
+                controls[position] = tuple(
+                    [
+                        _CellRef(self.step_id, p, key)
+                        for p in dict.fromkeys([*members, position])
+                        for key in keys
+                    ]
+                    + [_CellRef(self.step_id, p, column) for p in missing_candidates]
+                )
+                references += len(inputs[position]) + len(controls[position])
+                if references > 250_000:
+                    raise CaptureLimitError("Window exceeds 250,000 explicit provenance references")
+        if op == "lag":
+            result = (
+                df.groupby(keys, sort=False, dropna=False, observed=True)[column].shift(periods)
+                if keys
+                else df[column].shift(periods)
+            )
+        else:
+            result = pd.concat(chunks).sort_index() if chunks else df[column].iloc[:0].copy()
+        df[name] = result.array
+        original = self._snapshot.frame.columns
+        return self._story._add(
+            df,
+            name="Window calculation",
+            operation="window",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple((_RowRef(self.step_id, i),) for i in range(len(df))),
+            cell_parents=tuple(
+                {**{c: (_CellRef(self.step_id, i, c),) for c in original}, name: inputs[i]}
+                for i in range(len(df))
+            ),
+            cell_controls=tuple({name: controls[i]} for i in range(len(df))),
+            parameters={
+                "name": name,
+                "column": column,
+                "op": op,
+                "by": keys,
+                "periods": periods,
+                "size": size,
+                "min_periods": minimum,
+                "groups": groups,
+            },
+        )
+
     def filter_rows(
         self,
         predicate: Callable[[pd.DataFrame], Any] | Any,
@@ -1580,6 +1962,51 @@ class StoryFrame:
         if counts[reference] > max_sources:
             raise CaptureLimitError("Cell has more than max_sources inputs")
         return self._origin_slice(reference, counts, 0, max_sources)
+
+    def explain_controls(
+        self, row: int, column: str, *, max_sources: int = 10_000
+    ) -> tuple[CellOrigin, ...]:
+        """Trace source cells that controlled a conditional or window result.
+
+        Decision inputs are separate from source cells used to *make* the value.
+        For a ``filter_by`` output row, any column returns that row's predicate
+        inputs. Earlier operations may add further control inputs, but this
+        method reports the selected step's immediate decision inputs only.
+        """
+        _positive_integer(max_sources, "max_sources")
+        step = self._snapshot
+        if isinstance(row, bool) or not isinstance(row, int) or not 0 <= row < len(step.frame):
+            raise IndexError("row is an output row position")
+        if column not in step.frame.columns:
+            raise KeyError(column)
+        refs = (
+            step.cell_controls[row].get(column, ())
+            if step.cell_controls
+            else step.row_controls[row]
+            if step.row_controls
+            else ()
+        )
+        origins: list[CellOrigin] = []
+        for ref in refs:
+            source = StoryFrame(self._story, ref.step)
+            origins.extend(source.explain(ref.row, ref.column, max_sources=max_sources))
+            if len(origins) > max_sources:
+                raise CaptureLimitError("Control has more than max_sources inputs")
+        return tuple(origins)
+
+    def filter_decision(self, input_row: int) -> str:
+        """Return true, false, or missing for one original row of ``filter_by``."""
+        step = self._snapshot
+        if step.operation != "filter_by":
+            raise ValueError("filter_decision requires a filter_by result")
+        outcomes = step.parameters["outcomes"]
+        if (
+            isinstance(input_row, bool)
+            or not isinstance(input_row, int)
+            or not 0 <= input_row < len(outcomes)
+        ):
+            raise IndexError("input_row is an original row position")
+        return outcomes[input_row]
 
     def explain_page(
         self, row: int, column: str, *, offset: int = 0, limit: int = 50

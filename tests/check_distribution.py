@@ -78,8 +78,13 @@ def main() -> None:
             "tests/player-workbench.test.cjs",
             "tests/player-workflow-model.test.cjs",
             "tests/player-reshape.test.cjs",
+            "tests/player-decisions.test.cjs",
+            "tests/test_decisions_windows.py",
+            "tests/make_decision_fixture.py",
             "tests/fixtures/retail.json",
             "tests/fixtures/reshape.json",
+            "tests/fixtures/decisions.json",
+            "tests/fixtures/window_extrema.json",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -91,6 +96,7 @@ def main() -> None:
             "examples/motion_showcase.py",
             "examples/retail_workflow.py",
             "examples/reshape_workflow.py",
+            "examples/decision_window_workflow.py",
             "docs/v1.md",
             "docs/analysis.md",
             "docs/api.md",
@@ -158,12 +164,38 @@ assert clean.profile()["missing_cells"] == 0
 workflow_html = workflow.to_html(result=wide)
 assert 'FrameChoreoWorkbench' in workflow_html and 'framechoreo-license' in workflow_html
 assert 'lang="ja"' in workflow_html
+from framechoreo import col
+decisions = DataStory()
+input_frame = decisions.table(pd.DataFrame({
+    "sales": pd.Series([10, None, 30], dtype="Int64"),
+    "forecast": [None, 20, None], "target": [5, 15, 35],
+}))
+status = input_frame.case_when(
+    "status", column="sales", op="ge", value=col("target"),
+    then="pass", otherwise="review",
+)
+available = status.coalesce("effective", ["sales", "forecast"], default=0)
+running = available.window("running", column="effective", op="cumsum")
+lowest = available.window("lowest", column="effective", op="cummin")
+recent_high = available.window(
+    "recent_high", column="effective", op="rolling_max", size=2, min_periods=1
+)
+filtered = running.filter_by("sales", op="ge", value=col("target"))
+assert filtered.to_pandas()["sales"].tolist() == [10]
+assert [filtered.filter_decision(i) for i in range(3)] == ["true", "missing", "false"]
+assert [o.column for o in status.explain_controls(0, "status")] == ["sales", "target"]
+assert [o.column for o in available.explain(1, "effective")] == ["forecast"]
+assert [o.row for o in running.explain(2, "running")] == [0, 1, 2]
+assert lowest.to_pandas()["lowest"].tolist() == [10, 10, 10]
+assert recent_high.to_pandas()["recent_high"].tolist() == [10, 20, 30]
+assert 'decision-audit' in decisions.to_html(result=filtered)
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
     "origins": [int(o.value) for o in total.explain(0,"amount")],
     "analysis_rows": 1000, "analysis_source_total": last_page.total,
     "workflow_result_rows": len(wide.to_pandas()), "workflow_language": "ja",
+    "decision_result_rows": len(filtered.to_pandas()),
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

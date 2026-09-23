@@ -1,17 +1,18 @@
 # FrameChoreo
 
-**Explain pandas workflows with interactive tables, comparisons, charts, and value provenance.**
+**Explain pandas workflows with interactive tables, charts, and separate value and decision provenance.**
 
 Record cleaning, conversions, joins, reshaping, and grouped metrics. Readers can
 follow values in motion, compare before and after, inspect data quality, search
-records, switch to a chart, and trace each value to its recorded inputs. The exported HTML
+records, switch to a chart, and trace both values and explicit decisions to their
+recorded inputs. The exported HTML
 contains its player and recorded data: no Python server, account, or network access
 is needed to replay it.
 
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
-result was made. **1.0.0rc1 is a local release candidate; it has not been published.**
+result was made. **1.0.0rc2 is a local release candidate; it has not been published.**
 Operations are explicit and their results follow pandas. [The 1.0 guide](docs/v1.md)
 defines the supported workflow, reader features, and compatibility boundaries.
 
@@ -27,7 +28,7 @@ python -m pip install .
 Or install the prepared wheel:
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc1-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc2-py3-none-any.whl
 ```
 
 If you installed an earlier unreleased wheel with the same version, add
@@ -98,6 +99,10 @@ iframe through `_repr_html_()`.
 |---|---|
 | `table(df)` | Copies a source DataFrame; supports unique, nonempty string column names and scalar cells |
 | `filter_rows(predicate)` | Evaluates a callable once on a copy, or accepts a boolean mask; rejects input mutation and ambiguous Series alignment |
+| `filter_by(column, op=..., value=...)` | Explicit condition with true/false/missing outcomes for every input row and an excluded-row audit |
+| `case_when(name, column=..., op=..., value=..., then=..., otherwise=...)` | Chooses a value while separating the chosen value input from comparison inputs; `col("field")` denotes a column operand |
+| `coalesce(name, [...], default=...)` | Takes the first non-missing field in each row and shows every checked candidate |
+| `window(name, column=..., op=..., by=...)` | Grouped lag/difference, cumulative sum/min/max, and rolling sum/mean/min/max in current row order |
 | `merge(...)` | Left/inner/right/outer; shared or different key names; one-to-one, many-to-one, or one-to-many validation |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
 | `group_mean(by=..., value=..., dropna=...)` | Numeric non-boolean values; a group with no non-missing values is missing, since pandas skips missing values with no `min_count` to set |
@@ -115,6 +120,7 @@ iframe through `_repr_html_()`.
 | `profile()` | Native missing, unique, duplicate, and dtype summaries, detached from the snapshot |
 | `annotate(frame, ...)` | Adds a note, chapter, playback hold time, and highlighted columns without changing calculations |
 | `explain(row, column)` | Returns source value inputs, preserving repeated use of the same source cell |
+| `explain_controls(row, column)` / `filter_decision(input_row)` | Returns distinct decision inputs and the outcome for an explicit filter |
 | `explain_page(row, column, offset=..., limit=...)` | Bounded pages with exact totals, including repeated use of an aggregate |
 | `to_html` / `export_html` | Self-contained player; light, dark, or automatic theme |
 
@@ -131,6 +137,12 @@ insufficient non-missing inputs and flag recorded integer sums that differ from
 exact addition, helping identify dtype overflow while preserving the pandas result.
 Selecting a cell also shows its column dtype. Native float16/float32 formatting is
 retained; equal short decimal text can still hide different floating-point values.
+Conditional, fallback, and window steps show decision inputs separately from the
+cells that supplied the result value. An explicit filter lists removed rows as
+false or missing comparisons and opens the original row. These features are
+illustrated by `python examples/decision_window_workflow.py`. A long cumulative
+calculation can exceed the separate 250,000-reference provenance cap and raises
+instead of exporting a partial explanation.
 Selecting a value brings its origins into view and moves keyboard focus there.
 **Back to selected cell** restores the table and row, including an expanded row view.
 Empty and whitespace-only strings have visible labels and quoted text; their
@@ -202,6 +214,7 @@ python examples/group_aggregates.py
 python examples/motion_showcase.py
 python examples/retail_workflow.py
 python examples/reshape_workflow.py
+python examples/decision_window_workflow.py
 python examples/large_analysis.py --rows 5000
 ```
 
@@ -242,12 +255,12 @@ player. Run the cells in the Python environment where FrameChoreo is installed.
 ## Related work
 
 [Pandas Tutor](https://pandastutor.com/) already visualizes many table transformations
-and their input/output relationships. [Datamations](https://github.com/microsoft/datamations)
-animates analysis pipelines and includes Python code.
+and their input/output relationships. [Datamations](https://microsoft.github.io/datamations/)
+animates analysis pipelines; its official guide demonstrates R/dplyr workflows.
 [ipyvizzu](https://github.com/vizzuhq/ipyvizzu) builds animated charts.
 
-FrameChoreo explores a small authoring API, explicit pandas semantics, and a bundled
-player for portable table stories. The broader ideas of animation and provenance
+FrameChoreo explores explicit pandas semantics, separate value/decision inputs,
+and a bundled player for portable table stories. The broader ideas of animation and provenance
 are not new. This implementation is independent; no code from those projects is
 vendored.
 

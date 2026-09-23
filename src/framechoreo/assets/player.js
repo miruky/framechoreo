@@ -193,6 +193,7 @@
       const names = {
         source: "Input",
         filter: "Filter",
+        filter_by: "Decision filter",
         merge: "Join",
         group: "Group",
         sum: "Sum",
@@ -202,6 +203,9 @@
         select: "Columns",
         rename: "Rename",
         calculate: "Calculate",
+        case_when: "Choose",
+        coalesce: "Fallback",
+        window: "Window",
         drop_missing: "Drop missing",
         fill_missing: "Fill missing",
         drop_duplicates: "Deduplicate",
@@ -218,6 +222,7 @@
       const japanese = {
         source: "入力",
         filter: "抽出",
+        filter_by: "条件で抽出",
         merge: "結合",
         group: "グループ",
         sum: "合計",
@@ -227,6 +232,9 @@
         select: "列を選ぶ",
         rename: "名前を変える",
         calculate: "計算",
+        case_when: "条件で選ぶ",
+        coalesce: "最初の値を選ぶ",
+        window: "窓計算",
         drop_missing: "欠損行を除く",
         fill_missing: "欠損を補う",
         drop_duplicates: "重複を除く",
@@ -300,6 +308,9 @@
     body.append(notice);
     const legend = el("div", "legend");
     body.append(legend);
+    const decisionAudit = el("section", "decision-audit");
+    decisionAudit.hidden = true;
+    body.append(decisionAudit);
     const motionStatus = el("div", "motion-status");
     body.append(motionStatus);
     const backToStep = button(
@@ -359,7 +370,9 @@
     );
     const origins = el("div", "origins"),
       originPager = el("div", "origin-pager"),
+      decisionInputs = el("div", "decision-inputs"),
       explanation = el("div", "explanation");
+    decisionInputs.hidden = true;
     const clearSelection = button(
       tx("Clear selection", "選択を解除"),
       () => {
@@ -377,6 +390,8 @@
         columnDtype.textContent = "";
         selectionLegend.textContent = "";
         origins.replaceChildren();
+        decisionInputs.replaceChildren();
+        decisionInputs.hidden = true;
         lineagePath.replaceChildren();
         originPager.replaceChildren();
         explanation.textContent = "";
@@ -408,6 +423,7 @@
       columnDtype,
       selectionLegend,
       lineagePath,
+      decisionInputs,
       origins,
       originPager,
       explanation,
@@ -609,6 +625,8 @@
       returnSelection.hidden = false;
       explanation.classList.remove("calculation-note");
       origins.replaceChildren();
+      decisionInputs.replaceChildren();
+      decisionInputs.hidden = true;
       lineagePath.replaceChildren();
       originPager.replaceChildren();
       try {
@@ -622,6 +640,44 @@
           lineagePath.append(chip);
         }
         const details = model.cellExplanation(steps, { step, row, column }, language);
+        const controls = model.controlInputs(steps, { step, row, column });
+        if (controls.length) {
+          decisionInputs.hidden = false;
+          decisionInputs.append(
+            el(
+              "div",
+              "decision-title",
+              tx("DECISION INPUTS", "判定に使った入力") + " · " + controls.length,
+            ),
+          );
+          for (const control of controls.slice(0, 24)) {
+            const item = button(
+              "",
+              () => inspectStep(control.step, control),
+              "origin decision-origin",
+            );
+            item.append(
+              el(
+                "span",
+                "muted",
+                control.name + " · row " + (control.row + 1) + " · " + control.column,
+              ),
+              el("span", "value", displayValue(control.cell)),
+            );
+            decisionInputs.append(item);
+          }
+          if (controls.length > 24)
+            decisionInputs.append(
+              el(
+                "p",
+                "muted",
+                tx(
+                  "Showing the first 24 decision inputs. Use Python explain_controls() for the complete list.",
+                  "判定入力は先頭24件を表示しています。全件は Python の explain_controls() で確認できます。",
+                ),
+              ),
+            );
+        }
         const instructions =
           trace.total > 0n
             ? tx(
@@ -992,7 +1048,7 @@
     }
     function renderLegend(scene) {
       legend.replaceChildren();
-      if (["filter", "drop_missing", "drop_duplicates"].includes(scene.kind))
+      if (["filter", "filter_by", "drop_missing", "drop_duplicates"].includes(scene.kind))
         legend.append(
           legendItem(
             "data-kind",
@@ -1011,6 +1067,17 @@
             tx(
               "Blue cards → matching result cells. Select a value to inspect its source.",
               "青いカードから、対応する結果のセルへ値が移動します。値を選ぶと入力元を確認できます。",
+            ),
+          ),
+        );
+      else if (["case_when", "coalesce", "window"].includes(scene.kind))
+        legend.append(
+          legendItem(
+            "data-kind",
+            "calculate",
+            tx(
+              "Colored value cards show the selected inputs. Decision inputs appear in the inspector.",
+              "色付きの値カードは実際の入力元です。判定入力は詳細欄で確認できます。",
             ),
           ),
         );
@@ -1042,6 +1109,74 @@
             ),
           );
       }
+    }
+    function renderDecisionAudit(scene) {
+      decisionAudit.replaceChildren();
+      decisionAudit.hidden = scene.kind !== "filter_by" || Boolean(state.inspection);
+      if (decisionAudit.hidden) return;
+      const outcome = scene.step.parameters.outcomes,
+        source = steps.get(scene.step.parents[0]),
+        condition = scene.step.parameters.condition,
+        excluded = outcome.flatMap((result, row) => (result === "true" ? [] : [{ result, row }])),
+        failed = outcome.filter((result) => result === "false").length,
+        missing = outcome.filter((result) => result === "missing").length;
+      decisionAudit.setAttribute("aria-label", tx("Filtered-row decisions", "除外した行の判定"));
+      decisionAudit.append(
+        el("div", "decision-audit-title", tx("Why rows left", "除外した行の理由")),
+        el(
+          "p",
+          "decision-audit-summary",
+          tx(
+            failed + " failed the condition · " + missing + " had a missing comparison",
+            failed + "行は条件不成立 · " + missing + "行は比較結果が欠損",
+          ),
+        ),
+      );
+      const list = el("div", "decision-audit-list");
+      for (const item of excluded.slice(0, 12)) {
+        const cell = source.rows[item.row].cells[source.columns.indexOf(condition.column)];
+        const action = button(
+          "",
+          () =>
+            inspectStep(source.id, {
+              step: source.id,
+              row: item.row,
+              column: condition.column,
+            }),
+          "decision-audit-row",
+        );
+        action.append(
+          el("strong", "", tx("Row ", "行 ") + (item.row + 1)),
+          el(
+            "span",
+            "",
+            item.result === "missing"
+              ? tx("Comparison missing", "比較結果が欠損")
+              : tx("Condition false", "条件不成立"),
+          ),
+          el("span", "decision-audit-value", condition.column + " = " + displayValue(cell)),
+        );
+        list.append(action);
+      }
+      decisionAudit.append(list);
+      if (excluded.length > 12)
+        decisionAudit.append(
+          el(
+            "p",
+            "muted",
+            tx(
+              "Showing the first 12 excluded rows. All decisions remain in the recorded source table.",
+              "除外行の先頭12件を表示しています。判定結果はすべて記録されています。",
+            ),
+          ),
+        );
+      decisionAudit.append(
+        button(
+          tx("Inspect all source rows", "元の全行を見る"),
+          () => inspectStep(source.id, null, true),
+          "text-button",
+        ),
+      );
     }
     function replayMotion() {
       if (
@@ -1147,7 +1282,11 @@
     }
     function animateTransition(scene, oldRows, oldCells, rows) {
       const aggregate = ["sum", "mean", "count", "aggregate"].includes(scene.kind),
-        transfer = aggregate || ["merge", "melt", "pivot", "calculate"].includes(scene.kind),
+        transfer =
+          aggregate ||
+          ["merge", "melt", "pivot", "calculate", "case_when", "coalesce", "window"].includes(
+            scene.kind,
+          ),
         flows = [],
         sources = new Map(),
         targets = new Map();
@@ -1161,7 +1300,7 @@
               ? [scene.step.parameters.value_name]
               : scene.kind === "pivot"
                 ? scene.step.parameters.output_columns
-                : scene.kind === "calculate"
+                : ["calculate", "case_when", "coalesce", "window"].includes(scene.kind)
                   ? [scene.step.parameters.name]
                   : scene.table.columns;
           for (const column of columns) {
@@ -1241,7 +1380,7 @@
         }
         // Only a filter removes rows here. A preview or a chapter jump is not
         // evidence of exclusion, so it must not manufacture departing records.
-        if (["filter", "drop_missing", "drop_duplicates"].includes(scene.kind)) {
+        if (["filter", "filter_by", "drop_missing", "drop_duplicates"].includes(scene.kind)) {
           const kept = new Set(
             scene.step.parameters.selected_rows || scene.step.parameters.positions,
           );
@@ -1481,6 +1620,7 @@
         source: "入力",
         input: "参照",
         filter: "抽出",
+        filter_by: "条件抽出",
         merge: "結合",
         group: "グループ",
         sum: "合計",
@@ -1491,6 +1631,9 @@
         select: "列選択",
         rename: "名前変更",
         calculate: "計算",
+        case_when: "条件選択",
+        coalesce: "優先値選択",
+        window: "窓計算",
         drop_missing: "欠損行除外",
         drop_duplicates: "重複除外",
         fill_missing: "欠損補完",
@@ -1503,12 +1646,19 @@
         melt: "縦長化",
         pivot: "横長化",
       };
+      const englishBadges = {
+        filter_by: "FILTER",
+        case_when: "DECISION",
+        coalesce: "FALLBACK",
+        window: "WINDOW",
+      };
       operation.textContent =
         language === "ja"
           ? badgeNames[scene.kind] || scene.kind.toUpperCase()
-          : scene.kind.toUpperCase();
+          : englishBadges[scene.kind] || scene.kind.toUpperCase();
       operation.dataset.kind = scene.kind;
       renderLegend(scene);
+      renderDecisionAudit(scene);
       caption.textContent = state.inspection
         ? model.tableLabel(data, tableData)
         : scene.kind === "group"
@@ -1525,13 +1675,26 @@
         "Select a value to follow its source cells.",
         "値を選ぶと、元の入力セルまでたどれます。",
       );
-      if (["filter", "drop_missing", "drop_duplicates"].includes(scene.kind))
+      if (["filter", "filter_by", "drop_missing", "drop_duplicates"].includes(scene.kind))
         note =
           count(scene.step.parameters.removed_rows, "row") +
           tx(
             " excluded; source rows remain available.",
             "を除外しました。元の行は入力表から確認できます。",
           );
+      if (scene.kind === "filter_by") {
+        const outcomes = scene.step.parameters.outcomes;
+        const missing = outcomes.filter((x) => x === "missing").length;
+        note +=
+          " " +
+          missing +
+          tx(
+            missing === 1
+              ? " comparison was missing and excluded."
+              : " comparisons were missing and excluded.",
+            "件の比較は欠損で、除外しました。",
+          );
+      }
       if (scene.kind === "merge") {
         const n = scene.step.parameters.unmatched_rows;
         note =
@@ -1576,6 +1739,21 @@
           " → " +
           p.name;
       }
+      if (scene.kind === "case_when")
+        note = tx(
+          "Each row chooses then or otherwise. Missing comparisons choose otherwise; inspect a cell for both input types.",
+          "各行で then または otherwise を選びます。比較が欠損のときは otherwise です。セルで入力の二種類を確認できます。",
+        );
+      if (scene.kind === "coalesce")
+        note = tx(
+          "Columns are checked from left to right. The first present value moves into the result; missing candidates remain decision inputs.",
+          "列を左から調べ、最初の欠損でない値を結果へ移します。欠損だった候補は判定入力として残します。",
+        );
+      if (scene.kind === "window")
+        note = tx(
+          "Rows are used in their current order. Sort first for a chronological result; inspect a result for exact window members.",
+          "現在の行順で計算します。時系列なら先に並べ替えてください。結果のセルから対象行を確認できます。",
+        );
       if (scene.kind === "melt")
         note = tx(
           "Values from " +
@@ -1681,9 +1859,19 @@
       motionStatus.textContent = "";
       if (shouldAnimate) animateTransition(scene, oldRows, oldCells, rows);
       else if (
-        ["merge", "sum", "mean", "count", "aggregate", "melt", "pivot", "calculate"].includes(
-          scene.kind,
-        ) &&
+        [
+          "merge",
+          "sum",
+          "mean",
+          "count",
+          "aggregate",
+          "melt",
+          "pivot",
+          "calculate",
+          "case_when",
+          "coalesce",
+          "window",
+        ].includes(scene.kind) &&
         workbench.mode === "table"
       ) {
         motionStatus.textContent =

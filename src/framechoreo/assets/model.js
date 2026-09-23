@@ -35,11 +35,31 @@
     new Set(keys).size === keys.length &&
     keys.every((c) => columns.includes(c));
   const sameRefs = (refs, expected) =>
+    Array.isArray(refs) &&
     refs.length === expected.length &&
     refs.every(
       (r, i) =>
         r.step === expected[i].step && r.row === expected[i].row && r.column === expected[i].column,
     );
+  const operand = (value, columns, allowMissing = false) =>
+    record(value) &&
+    Object.keys(value).length === 1 &&
+    (Object.prototype.hasOwnProperty.call(value, "column")
+      ? columns.includes(value.column)
+      : Object.prototype.hasOwnProperty.call(value, "constant") &&
+        validCell(value.constant) &&
+        (allowMissing || value.constant.type !== "missing"));
+  const conditionFields = (condition, columns) => {
+    if (!record(condition) || !columns.includes(condition.column)) return null;
+    if (["is_missing", "is_not_missing"].includes(condition.op))
+      return condition.value === null ? [condition.column] : null;
+    if (
+      !["eq", "ne", "gt", "ge", "lt", "le"].includes(condition.op) ||
+      !operand(condition.value, columns)
+    )
+      return null;
+    return [condition.column, ...(condition.value.column ? [condition.value.column] : [])];
+  };
   function metrics(step) {
     if (step.operation === "group_agg") return step.parameters.metrics;
     return Object.prototype.hasOwnProperty.call(aggregateScene, step.operation)
@@ -249,6 +269,196 @@
       }
       if (used.size !== parent.rows.length) invalid("pivot omitted an input row");
     }
+    if (["case_when", "filter_by"].includes(step.operation)) {
+      const fields = conditionFields(p.condition, columns);
+      if (
+        !fields ||
+        !Array.isArray(p.outcomes) ||
+        p.outcomes.length !== parent.rows.length ||
+        p.outcomes.some((outcome) => !["true", "false", "missing"].includes(outcome))
+      )
+        invalid("invalid condition");
+      if (step.operation === "case_when") {
+        if (
+          !p.name ||
+          columns.includes(p.name) ||
+          !sameList(step.columns, [...columns, p.name]) ||
+          step.rows.length !== parent.rows.length ||
+          !operand(p.then, columns, true) ||
+          !operand(p.otherwise, columns, true)
+        )
+          invalid("invalid conditional result");
+        step.rows.forEach((row, i) => {
+          const selected = p.outcomes[i] === "true" ? p.then : p.otherwise;
+          if (
+            !sameRefs(row.parents, [{ step: parent.id, row: i }]) ||
+            !record(row.cell_controls) ||
+            !sameList(Object.keys(row.cell_controls), [p.name]) ||
+            !sameRefs(
+              row.cell_controls[p.name],
+              fields.map((column) => ref(i, column)),
+            ) ||
+            !sameRefs(row.cell_parents[p.name], selected.column ? [ref(i, selected.column)] : [])
+          )
+            invalid("inconsistent conditional inputs");
+          for (const column of columns)
+            if (!sameRefs(row.cell_parents[column], [ref(i, column)]))
+              invalid("inconsistent unchanged conditional value");
+        });
+      } else {
+        const selected = p.outcomes.flatMap((outcome, i) => (outcome === "true" ? [i] : []));
+        if (
+          !sameList(step.columns, columns) ||
+          !sameList(p.selected_rows, selected) ||
+          p.removed_rows !== parent.rows.length - selected.length ||
+          step.rows.length !== selected.length
+        )
+          invalid("inconsistent condition filter");
+        step.rows.forEach((row, i) => {
+          const position = selected[i];
+          if (
+            !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+            !sameRefs(
+              row.row_controls,
+              fields.map((column) => ref(position, column)),
+            )
+          )
+            invalid("inconsistent filtered decision inputs");
+          for (const column of columns)
+            if (!sameRefs(row.cell_parents[column], [ref(position, column)]))
+              invalid("inconsistent filtered value inputs");
+        });
+      }
+    }
+    if (step.operation === "coalesce") {
+      if (
+        !p.name ||
+        columns.includes(p.name) ||
+        !sameList(step.columns, [...columns, p.name]) ||
+        !namedKeys(p.columns, columns) ||
+        !validCell(p.default) ||
+        !Array.isArray(p.selected_columns) ||
+        p.selected_columns.length !== parent.rows.length ||
+        step.rows.length !== parent.rows.length
+      )
+        invalid("invalid coalescing settings");
+      step.rows.forEach((row, i) => {
+        const checked = [];
+        let chosen = null;
+        for (const candidate of p.columns) {
+          checked.push(candidate);
+          if (parent.rows[i].cells[columns.indexOf(candidate)].type !== "missing") {
+            chosen = candidate;
+            break;
+          }
+        }
+        if (
+          p.selected_columns[i] !== chosen ||
+          !sameRefs(row.parents, [{ step: parent.id, row: i }]) ||
+          !record(row.cell_controls) ||
+          !sameList(Object.keys(row.cell_controls), [p.name]) ||
+          !sameRefs(
+            row.cell_controls[p.name],
+            checked.map((column) => ref(i, column)),
+          ) ||
+          !sameRefs(row.cell_parents[p.name], chosen ? [ref(i, chosen)] : [])
+        )
+          invalid("inconsistent first-available inputs");
+        for (const column of columns)
+          if (!sameRefs(row.cell_parents[column], [ref(i, column)]))
+            invalid("inconsistent unchanged coalesced value");
+      });
+    }
+    if (step.operation === "window") {
+      if (
+        !p.name ||
+        columns.includes(p.name) ||
+        !columns.includes(p.column) ||
+        !sameList(step.columns, [...columns, p.name]) ||
+        !namedKeys(p.by, columns, true) ||
+        p.by.includes(p.column) ||
+        ![
+          "lag",
+          "diff",
+          "cumsum",
+          "cummin",
+          "cummax",
+          "rolling_sum",
+          "rolling_mean",
+          "rolling_min",
+          "rolling_max",
+        ].includes(p.op) ||
+        !Number.isSafeInteger(p.periods) ||
+        p.periods < 1 ||
+        !Number.isSafeInteger(p.size) ||
+        p.size < 1 ||
+        !Number.isSafeInteger(p.min_periods) ||
+        p.min_periods < 0 ||
+        p.min_periods > p.size ||
+        step.rows.length !== parent.rows.length ||
+        !Array.isArray(p.groups)
+      )
+        invalid("invalid window settings");
+      const seen = new Set();
+      for (const group of p.groups) {
+        if (!Array.isArray(group) || !group.length) invalid("empty window group");
+        group.forEach((position, j) => {
+          if (
+            !Number.isSafeInteger(position) ||
+            position < 0 ||
+            position >= parent.rows.length ||
+            seen.has(position) ||
+            (j && position <= group[j - 1])
+          )
+            invalid("invalid window group membership");
+          seen.add(position);
+          const row = step.rows[position],
+            range = group.slice(Math.max(0, j - p.size + 1), j + 1),
+            present = (position) =>
+              parent.rows[position].cells[columns.indexOf(p.column)].type !== "missing";
+          const members =
+            p.op === "lag"
+              ? j >= p.periods
+                ? [group[j - p.periods]]
+                : []
+              : p.op === "diff"
+                ? j >= p.periods
+                  ? [position, group[j - p.periods]]
+                  : [position]
+                : ["cumsum", "cummin", "cummax"].includes(p.op)
+                  ? present(position)
+                    ? group.slice(0, j + 1).filter(present)
+                    : []
+                  : range.filter(present);
+          const controls = [
+            ...[...new Set([...members, position])].flatMap((r) =>
+              p.by.map((column) => ref(r, column)),
+            ),
+            ...(p.op.startsWith("rolling_")
+              ? range.filter((r) => !present(r))
+              : ["cumsum", "cummin", "cummax"].includes(p.op) && !present(position)
+                ? [position]
+                : []
+            ).map((r) => ref(r, p.column)),
+          ];
+          if (
+            !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
+            !sameRefs(
+              row.cell_parents[p.name],
+              members.map((r) => ref(r, p.column)),
+            ) ||
+            !record(row.cell_controls) ||
+            !sameList(Object.keys(row.cell_controls), [p.name]) ||
+            !sameRefs(row.cell_controls[p.name], controls)
+          )
+            invalid("inconsistent window provenance");
+          for (const column of columns)
+            if (!sameRefs(row.cell_parents[column], [ref(position, column)]))
+              invalid("inconsistent unchanged window value");
+        });
+      }
+      if (seen.size !== parent.rows.length) invalid("window omitted rows");
+    }
   }
   function indexStory(data) {
     if (!data || data.format !== "framechoreo.story" || data.schema_version !== 1) {
@@ -290,6 +500,10 @@
       pivot: 1,
       concat: -1,
       group_agg: 1,
+      case_when: 1,
+      filter_by: 1,
+      window: 1,
+      coalesce: 1,
     };
     for (const step of data.steps) {
       if (!step || typeof step.id !== "string" || !step.id || steps.has(step.id))
@@ -348,6 +562,22 @@
           )
             invalid("invalid cell reference");
         }
+        if (
+          row.row_controls !== undefined &&
+          (!Array.isArray(row.row_controls) || row.row_controls.some((ref) => !validRef(ref, true)))
+        )
+          invalid("invalid row control reference");
+        if (
+          row.cell_controls !== undefined &&
+          (!record(row.cell_controls) ||
+            Object.entries(row.cell_controls).some(
+              ([column, refs]) =>
+                !step.columns.includes(column) ||
+                !Array.isArray(refs) ||
+                refs.some((ref) => !validRef(ref, true)),
+            ))
+        )
+          invalid("invalid cell control reference");
         if (
           step.operation !== "source" &&
           step.columns.some(
@@ -781,6 +1011,19 @@
   function cellKey(step, row, column) {
     return JSON.stringify([step, row, column]);
   }
+  function controlInputs(steps, reference) {
+    const step = validateReference(steps, reference),
+      row = step.rows[reference.row],
+      refs = row.cell_controls?.[reference.column] || row.row_controls || [];
+    return refs.map((ref) => {
+      const source = steps.get(ref.step);
+      return {
+        ...ref,
+        cell: source.rows[ref.row].cells[source.columns.indexOf(ref.column)],
+        name: source.name,
+      };
+    });
+  }
   function cellExplanation(steps, reference, language = "en") {
     if (language === "ja") {
       const original = cellExplanation(steps, reference, "en");
@@ -790,7 +1033,47 @@
         m = metrics(step).find((m) => m.output === reference.column),
         refs = row.cell_parents[reference.column] || [];
       let text;
-      if (m) {
+      if (step.operation === "case_when" && reference.column === step.parameters.name) {
+        const outcome = step.parameters.outcomes[reference.row];
+        text =
+          (outcome === "missing"
+            ? "比較が欠損だったため、otherwise の値を選びました。"
+            : outcome === "true"
+              ? "条件が成立し、then の値を選びました。"
+              : "条件が成立せず、otherwise の値を選びました。") +
+          "値の入力元と判定入力は別に表示します。";
+      } else if (step.operation === "filter_by")
+        text = "条件を満たした行です。判定に使った入力は、コピーした値の入力元と分けて表示します。";
+      else if (step.operation === "window" && reference.column === step.parameters.name) {
+        const op = step.parameters.op;
+        if (op === "lag" && refs.length === 0)
+          text = "このグループに指定した距離の前の行がないため、結果は欠損です。";
+        else if (op === "diff" && refs.length === 1)
+          text =
+            "比較対象の前の行がないため差分は欠損です。現在の値だけを入力として記録しています。";
+        else if (op.startsWith("rolling_") && refs.length < step.parameters.min_periods)
+          text =
+            "窓内の有効な値が" +
+            refs.length +
+            "件で、必要な" +
+            step.parameters.min_periods +
+            "件に足りないため結果は欠損です。";
+        else if (
+          ["cumsum", "cummin", "cummax"].includes(op) &&
+          refs.length === 0 &&
+          row.cells[step.columns.indexOf(reference.column)].type === "missing"
+        )
+          text = "現在行の入力が欠損のため、この位置の累計結果も欠損です。";
+        else
+          text =
+            "現在の行順で計算した" +
+            op +
+            "です。値に寄与した行と、グループや欠損の判定入力を分けて表示します。";
+      } else if (step.operation === "coalesce" && reference.column === step.parameters.name)
+        text = step.parameters.selected_columns[reference.row]
+          ? "左から調べ、最初の欠損でない値を選びました。判定した列は別に表示します。"
+          : "すべて欠損だったため、指定した定数を使いました。元の値セルは捏造していません。";
+      else if (m) {
         const names = {
           sum: "合計",
           mean: "平均",
@@ -862,6 +1145,57 @@
       metric = metrics(step).find((m) => m.output === reference.column),
       operation = metric ? "group_" + metric.agg : step.operation,
       valueColumn = metric?.output || p.value;
+    if (step.operation === "case_when" && reference.column === p.name) {
+      const outcome = p.outcomes[reference.row];
+      return {
+        text:
+          (outcome === "missing"
+            ? "The comparison was missing, so otherwise was selected."
+            : outcome === "true"
+              ? "The condition was true, so then was selected."
+              : "The condition was false, so otherwise was selected.") +
+          " Value inputs and decision inputs are separate.",
+      };
+    }
+    if (step.operation === "filter_by")
+      return {
+        text: "This row passed the condition. Its deciding inputs are separate from its copied value inputs.",
+      };
+    if (step.operation === "window" && reference.column === p.name) {
+      const count = row.cell_parents[p.name].length;
+      if (p.op === "lag" && count === 0)
+        return {
+          text: "No earlier row exists at this lag within the group; the result is missing.",
+        };
+      if (p.op === "diff" && count === 1)
+        return {
+          text: "No earlier comparison row exists; only the current value is recorded and the difference is missing.",
+        };
+      if (p.op.startsWith("rolling_") && count < p.min_periods)
+        return {
+          text:
+            count +
+            " non-missing values are below min_periods=" +
+            p.min_periods +
+            "; the rolling result is missing.",
+        };
+      if (["cumsum", "cummin", "cummax"].includes(p.op) && count === 0 && cell.type === "missing")
+        return {
+          text: "The current input is missing, so the cumulative result at this row is missing.",
+        };
+      return {
+        text:
+          "This " +
+          p.op +
+          " uses current row order. Window values are separate from grouping and missing-value controls.",
+      };
+    }
+    if (step.operation === "coalesce" && reference.column === p.name)
+      return {
+        text: p.selected_columns[reference.row]
+          ? "The first non-missing column supplied the value. Tested columns are separate decision inputs."
+          : "Every candidate was missing, so the explicit default supplied the value. No source value was invented.",
+      };
     if (operation === "group_sum" && reference.column === valueColumn) {
       const refs = row.cell_parents[valueColumn],
         count = refs.length;
@@ -1039,6 +1373,60 @@
     const p = scene.step.parameters;
     if (scene.kind === "source") return "Recorded input";
     if (scene.kind === "filter") return "filter_rows(predicate)";
+    if (scene.kind === "filter_by")
+      return (
+        "filter_by(" +
+        JSON.stringify(p.condition.column) +
+        ", op=" +
+        JSON.stringify(p.condition.op) +
+        ", value=" +
+        JSON.stringify(p.condition.value) +
+        ")"
+      );
+    if (scene.kind === "case_when")
+      return (
+        "case_when(" +
+        JSON.stringify(p.name) +
+        ", column=" +
+        JSON.stringify(p.condition.column) +
+        ", op=" +
+        JSON.stringify(p.condition.op) +
+        ", value=" +
+        JSON.stringify(p.condition.value) +
+        ", then=" +
+        JSON.stringify(p.then) +
+        ", otherwise=" +
+        JSON.stringify(p.otherwise) +
+        ")"
+      );
+    if (scene.kind === "window")
+      return (
+        "window(" +
+        JSON.stringify(p.name) +
+        ", column=" +
+        JSON.stringify(p.column) +
+        ", op=" +
+        JSON.stringify(p.op) +
+        ", by=" +
+        JSON.stringify(p.by) +
+        ", periods=" +
+        p.periods +
+        ", size=" +
+        p.size +
+        ", min_periods=" +
+        p.min_periods +
+        ")"
+      );
+    if (scene.kind === "coalesce")
+      return (
+        "coalesce(" +
+        JSON.stringify(p.name) +
+        ", " +
+        JSON.stringify(p.columns) +
+        ", default=" +
+        JSON.stringify(p.default) +
+        ")"
+      );
     if (scene.kind === "drop_missing")
       return (
         "drop_missing(subset=" + JSON.stringify(p.subset) + ", how=" + JSON.stringify(p.how) + ")"
@@ -1182,6 +1570,7 @@
     rowKey,
     cellKey,
     cellExplanation,
+    controlInputs,
     tableLabel,
     groupTitle,
     orderedRows,

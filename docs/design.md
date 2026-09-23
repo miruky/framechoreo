@@ -19,6 +19,14 @@ a key-only pandas merge with positional markers. The public result comes from a
 separate ordinary pandas merge, preserving its column metadata. Group membership
 comes from the native GroupBy object and its group numbers.
 
+Explicit conditions add a second provenance relation. `cell_parents` is the
+actual value source; `cell_controls` records cells used to choose a branch,
+fallback, or window membership. An explicit filter uses `row_controls` for its
+retained rows and records every input-row outcome, including removed rows. The
+arbitrary `filter_rows` callback has no inferred control relation. Python
+exposes the current step's decision sources through `explain_controls`; the
+browser displays direct control cells separately.
+
 For a sum, value-input references omit missing numeric inputs. Row membership,
 grouping keys, and minimum-count settings are retained separately. Repeated
 references are intentional: adding an aggregate twice must show its inputs twice.
@@ -76,6 +84,12 @@ The analysis profile adds a cumulative cell budget. Large table views use 100-ro
 pages; source-use lists use 50-input pages and counted subtree skipping. The player
 validates and indexes a story at load and reuses that index for inspection. Source
 highlighting uses reachable cells without expanding every repeated source use.
+Window calculations use pandas for results and explicit positional references
+for their contributing rows. A cumulative sequence can create quadratic
+provenance, so one window step fails at 250,000 explicit value/control
+references. This is an honest bound rather than silent sampling or a claim of
+50,000-row cumulative support. A future compact lineage representation would
+need cross-language validation before raising this limit.
 
 JSON is a versioned display model; it is not a general pandas round-trip format.
 Self-contained HTML includes the matching player and is the primary sharing format. No external font, CDN, telemetry, API

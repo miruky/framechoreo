@@ -1,12 +1,12 @@
-# Validation scope for 1.0.0rc1
+# Validation scope for 1.0.0rc2
 
-This is an unpublished local candidate checked on macOS on 2026-09-22. It is not a
+This is an unpublished local candidate checked on macOS on 2026-09-23. It is not a
 claim of universal pandas coverage, cross-browser certification, or demonstrated
 teaching effectiveness. [The 1.0 guide](v1.md) defines the intended surface.
 
 ## Python and pandas
 
-The complete **196-test Python suite** passed in all five local environments:
+The complete **218-test Python suite** passed in all five local environments:
 
 | Python | pandas | NumPy |
 |---|---|---|
@@ -21,26 +21,38 @@ compression, and lineage tests remain. New cases compare cleaning, conversions,
 concatenation, reshaping, extended joins, named reductions, and quality profiles
 against pandas and independent positional input expectations.
 
-Two new property tests each exercise up to 80 generated cases for named metrics
+Two existing property tests each exercise up to 80 generated cases for named metrics
 and melt/pivot round trips. Boundaries include empty and all-missing tables,
 duplicate indices, right-only join rows, missing schema fields, repeated frames,
 nullable types, UTC conversion, reserved/prototype-like field names, rejected
 arguments, and expansion beyond capture limits. The reserved-name regression
 confirmed that a metric named `func` must not become a pandas method argument.
+The new tests compare conditional choices, first-present fallback, nine window
+operations, and explicit filtering against pandas. Randomized cases cover nullable
+values and group boundaries across 35 generated cases. A 1,000-row cumulative
+example confirms that the 250,000-reference guard fails without appending a partial step. A cross-version
+regression also checks the exact missing representation produced by grouped
+text `shift` on pandas 2.2 and 3.0.
 
 ## Browser model and controls
 
-The JavaScript suite uses Node.js 25.9.0, jsdom, synthetic geometry, and a controlled
+The JavaScript suite uses Node.js 26.9.0, jsdom, synthetic geometry, and a controlled
 clock. It checks the actual player controls, legacy stories, all four reader views,
 search, column visibility, comparison selection, origin return, table catalogs,
 Japanese labels, signed/unsafe chart values, group identity, malformed metadata,
 and recorded movement for joins, named metrics, melt, pivot, and arithmetic.
+It also checks decision inputs separately from value inputs, malformed
+conditional/window/coalesce references, the excluded-row audit, and source-row
+navigation. **136 JavaScript tests** passed.
 Synthetic rectangles test correspondence; they do not measure browser CSS layout.
 
-The Python/JavaScript wire check compares **803 cells** and a page near the end of
-10^18 logical repeated source uses. This is a small repeated-reference graph, not
-10^18 physical rows. The checks include the new operations, schema gaps, reserved
-metric names, and repeated inputs. No tests are skipped to accommodate a result.
+The Python/JavaScript wire check compares **999 value cells, 75 control-source
+uses**, and a page near the end of 10^18 logical repeated source uses. This is
+a small repeated-reference graph, not 10^18 physical rows. The checks include
+the new operations, schema gaps, reserved metric names, and repeated inputs. No
+tests are skipped to accommodate a result.
+The new decision workflow contributes conditional, fallback, grouped-window,
+and explicit-filter references to this cross-language comparison.
 
 ## Interactive checks
 
@@ -54,6 +66,11 @@ search, visible fields, and returning to the chosen view. At 390×844, the retai
 page stayed within 390 pixels; searching `bad` after choosing the quantity column
 showed two of five input rows. Selecting Books revenue 2700 from its chart reached
 raw values 1, 900, 2, 900 and restored focus to the bar on return.
+For the new weekly example, selecting a constant `Review` result showed no raw
+value input and two separate comparison inputs; the filter audit distinguished
+one false comparison from one missing comparison. At 390×844 the document width
+remained 390 pixels, and selecting the excluded missing row focused its original
+sales cell. This checks the actual HTML and browser layout, beyond jsdom geometry.
 
 The notebook check executes the shipped notebook in an isolated kernel, inspects
 its rich-output markup, and shuts the kernel down. The sandboxed player can also be
@@ -68,6 +85,10 @@ virtual environment. The installed smoke test blocks runtime socket connections
 and exercises the README example, a 1,000-row analysis, and cleaning through named
 aggregation, melt, and pivot. The player assets and player-only MIT notice must be
 present in the installed package and HTML output.
+The rc2 fresh-install smoke also executes conditional selection, coalescing,
+cumulative windows, explicit filtering, and their decision/value provenance with
+runtime socket connections blocked. The checked wheel and sdist hashes are in
+the local `V1拡張2/distribution.json` release evidence.
 
 The repository configures Linux/macOS/Windows CI. That remote matrix has **not**
 been run while publication is on hold. Actual GUI checks here cover Chromium;
@@ -77,4 +98,4 @@ limits; these checks do not establish suitability for arbitrary or unbounded dat
 
 Earlier 0.1 measurements and frontend checks are retained in
 [the historical validation record](validation-0.1.md). In particular, its memory
-and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc1.
+and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc2.

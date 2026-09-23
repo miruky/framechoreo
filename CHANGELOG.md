@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0rc2 — Unpublished candidate
+
+- Add explicit conditional choices, comparison-based filtering, and first-present fallback columns with value and decision inputs kept separate.
+- Add per-input-row true/false/missing decisions and a browser audit that links excluded rows to their recorded inputs.
+- Add grouped lag, difference, cumulative sum/min/max, and fixed rolling sum/mean/min/max using current row order and precise window-member references.
+- Bound window provenance to 250,000 explicit references rather than silently sampling a large cumulative explanation.
+- Add a complete weekly decision/window example, malformed-payload checks, randomized pandas comparisons, and browser inspector tests.
+
 ## 1.0.0rc1 — Unpublished candidate
 
 - Add missing-value handling, deduplication, explicit row selection, dtype and numeric/date conversion, and string normalization.

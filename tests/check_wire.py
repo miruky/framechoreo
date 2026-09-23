@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from framechoreo import DataStory
+from framechoreo import DataStory, col
 from framechoreo.encoding import encode_cell
 
 
@@ -175,6 +175,56 @@ def main():
     combined = gaps.concat([first, second, first])
     cases.append((gaps, [first, second, combined]))
 
+    decisions = DataStory()
+    source = decisions.table(
+        pd.DataFrame(
+            {
+                "team": ["a", "b", "a", "b"],
+                "sales": pd.Series([10, None, 30, 40], dtype="Int64"),
+                "forecast": [None, 20, None, None],
+                "target": [5, 15, 35, 35],
+            }
+        ),
+        name="Decision input",
+    )
+    status = source.case_when(
+        "status",
+        column="sales",
+        op="ge",
+        value=col("target"),
+        then="pass",
+        otherwise="review",
+    )
+    effective = status.coalesce("effective", ["sales", "forecast"], default=0)
+    running = effective.window("running", column="effective", op="cumsum", by="team")
+    recent = running.window(
+        "recent",
+        column="effective",
+        op="rolling_sum",
+        by="team",
+        size=2,
+        min_periods=1,
+    )
+    selected = recent.filter_by("sales", op="ge", value=col("target"))
+    cases.append((decisions, [source, status, effective, running, recent, selected]))
+
+    extrema = DataStory()
+    source = extrema.table(pd.DataFrame({"group": ["a", "b", "a"], "v": [3.0, 7.0, None]}))
+    low = source.window("cumlow", column="v", op="cummin", by="group")
+    high = low.window("cumhigh", column="v", op="cummax", by="group")
+    recent_low = high.window(
+        "recent_low", column="v", op="rolling_min", by="group", size=2, min_periods=1
+    )
+    recent_high = recent_low.window(
+        "recent_high",
+        column="v",
+        op="rolling_max",
+        by="group",
+        size=2,
+        min_periods=1,
+    )
+    cases.append((extrema, [source, low, high, recent_low, recent_high]))
+
     for story, frames in cases:
         checks = []
         for frame in frames:
@@ -190,12 +240,22 @@ def main():
                         }
                         for o in frame.explain(row, column)
                     ]
+                    controls = [
+                        {
+                            "step": o.step_id,
+                            "row": o.row,
+                            "column": o.column,
+                            "cell": encode_cell(o.value),
+                        }
+                        for o in frame.explain_controls(row, column)
+                    ]
                     limit = max(1, len(inputs))
                     assert len(frame.explain(row, column, max_sources=limit)) == len(inputs)
                     checks.append(
                         {
                             "reference": {"step": frame.step_id, "row": row, "column": column},
                             "inputs": inputs,
+                            "controls": controls,
                             "max_sources": limit,
                         }
                     )

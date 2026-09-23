@@ -22,6 +22,7 @@
   --op-filter: color-mix(in srgb, var(--g4) 60%, var(--ink) 40%);
   --op-merge: color-mix(in srgb, var(--g3) 60%, var(--ink) 40%);
   --op-agg: color-mix(in srgb, var(--g1) 60%, var(--ink) 40%);
+  --op-derive: color-mix(in srgb, var(--g0) 64%, var(--ink) 36%);
 }
 :root[data-theme="light"] {
   color-scheme: light;
@@ -315,7 +316,8 @@ p {
    neutral .operation style above; every mapped kind funnels through a
    single --op-color so the badge and any matching .legend-swatch never
    fall out of sync. */
-[data-kind="filter"] {
+[data-kind="filter"],
+[data-kind="filter_by"] {
   --op-color: var(--op-filter);
 }
 [data-kind="merge"] {
@@ -327,12 +329,23 @@ p {
 [data-kind="count"] {
   --op-color: var(--op-agg);
 }
+[data-kind="calculate"],
+[data-kind="case_when"],
+[data-kind="coalesce"],
+[data-kind="window"] {
+  --op-color: var(--op-derive);
+}
 .operation[data-kind="filter"],
+.operation[data-kind="filter_by"],
 .operation[data-kind="merge"],
 .operation[data-kind="group"],
 .operation[data-kind="sum"],
 .operation[data-kind="mean"],
-.operation[data-kind="count"] {
+.operation[data-kind="count"],
+.operation[data-kind="calculate"],
+.operation[data-kind="case_when"],
+.operation[data-kind="coalesce"],
+.operation[data-kind="window"] {
   font-weight: 600;
   color: var(--op-color);
   border-color: var(--op-color);
@@ -831,6 +844,74 @@ p {
   max-height: min(360px, 45vh);
   overflow: auto;
   padding: 3px 3px 5px;
+}
+.decision-inputs:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 10px;
+  margin: 10px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--op-derive) 38%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--op-derive) 5%, var(--paper));
+}
+.decision-title {
+  flex-basis: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--op-derive);
+}
+.decision-origin {
+  border-color: color-mix(in srgb, var(--op-derive) 32%, var(--line));
+  background: var(--paper);
+}
+.decision-inputs .muted {
+  font-size: 11px;
+}
+.decision-audit:not([hidden]) {
+  margin: 10px 0 14px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, var(--op-filter) 36%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--op-filter) 5%, var(--paper));
+}
+.decision-audit-title {
+  color: var(--op-filter);
+  font-weight: 700;
+  font-size: 13px;
+}
+.decision-audit-summary {
+  margin: 3px 0 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.decision-audit-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.decision-audit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  max-width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  font-size: 12px;
+}
+.decision-audit-row:hover,
+.decision-audit-row:focus-visible {
+  border-color: var(--op-filter);
+}
+.decision-audit-value {
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .origin {
   display: flex;
