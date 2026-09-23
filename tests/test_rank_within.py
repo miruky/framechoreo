@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from framechoreo import CaptureLimitError, DataStory
+from framechoreo import DataStory
 
 
 @pytest.mark.parametrize("method", ["average", "min", "max", "dense", "first"])
@@ -79,12 +79,20 @@ def test_missing_group_key_is_ranked_and_invalid_types_are_rejected_atomically()
     assert len(story._steps) == 2
 
 
-def test_rank_reference_expansion_fails_without_partial_step():
+def test_large_rank_uses_shared_references_with_exact_late_page():
     story = DataStory.for_analysis()
     source = story.table(pd.DataFrame({"g": ["one"] * 1000, "v": range(1000)}))
-    with pytest.raises(CaptureLimitError, match="250,000"):
-        source.rank_within("rank", by="g", value="v")
-    assert len(story._steps) == 1
+    rank = source.rank_within("rank", by="g", value="v")
+    assert rank.to_pandas()["rank"].iloc[0] == 1000.0
+    payload = story.to_dict(result=rank)
+    assert payload["schema_version"] == 2
+    assert payload["steps"][-1]["parameters"]["lineage_encoding"] == "shared_group"
+    assert payload["steps"][-1]["rows"][0]["cell_parents"]["rank"] == []
+    assert len(story.to_json(result=rank)) < 1_000_000
+    assert len(rank.explain_controls(0, "rank")) == 1000
+    page = rank.explain_page(0, "rank", offset=998, limit=5)
+    assert page.total == 1000
+    assert [origin.row for origin in page.origins] == [998, 999]
 
 
 def test_empty_rank_keeps_an_empty_numeric_result():

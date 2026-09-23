@@ -123,16 +123,29 @@ highlighting uses reachable cells without expanding every repeated source use.
 Window calculations use pandas for results and explicit positional references
 for their contributing rows. A cumulative sequence can create quadratic
 provenance, so one window step fails at 250,000 explicit value/control
-references. This is an honest bound rather than silent sampling or a claim of
-50,000-row cumulative support. A future compact lineage representation would
-need cross-language validation before raising this limit.
-`group_transform` repeats one group's metric beside every member. Its value
-and key references can also grow quadratically, so it uses the same 250,000
-explicit-reference bound. It preserves row identity, including duplicate index
-labels, and records excluded missing-key rows separately.
-`rank_within` uses the same bound because every ranked row references its
-group's candidate values. `merge_asof` retains one right-row match per left
-row, so its positional map does not expand the number of output rows.
+references. This remains an honest bound rather than silent sampling or a
+claim of 50,000-row cumulative support.
+`group_transform` and `rank_within` repeat one group's candidates across many
+rows. Their Python snapshots reuse the same candidate tuples. Above 250,000
+would-be value/control references, the export writes schema version 2 with
+`lineage_encoding="shared_group"`. Repeated row entries carry empty reference
+arrays while group membership and source cells define exact value and decision
+references. The matching player reconstructs a group's candidate list on demand
+and pages raw origins without storing a copy for each output row. Version 1
+stories retain explicit lists and remain readable. This does not raise the
+50,000-row capture ceiling or make the decoded story streaming.
+`merge_asof` retains one right-row match per left row, so its positional map
+does not expand the number of output rows.
+
+`pct_change` delegates fractional results to pandas with no implicit filling.
+The current and earlier values are recorded in row order even when a missing
+value or zero denominator produces a missing or infinite result.
+`resample_time` delegates fixed-width bucket boundaries and aggregates to pandas.
+The resampler's positional `indices` provide bin membership, including gaps
+between populated bins. A generated bucket label is not treated as a copied
+timestamp; timestamps and optional grouping keys are decision inputs. The
+player validates positional coverage and source references without trying to
+recompute timezone or boundary arithmetic from display strings.
 
 JSON is a versioned display model; it is not a general pandas round-trip format.
 Self-contained HTML includes the matching player and is the primary sharing format. No external font, CDN, telemetry, API

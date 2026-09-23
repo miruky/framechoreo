@@ -85,6 +85,9 @@ def main() -> None:
             "tests/player-ordered-cases.test.cjs",
             "tests/player-asof.test.cjs",
             "tests/player-rank.test.cjs",
+            "tests/player-shared-group.test.cjs",
+            "tests/player-pct-change.test.cjs",
+            "tests/player-time-buckets.test.cjs",
             "tests/test_decisions_windows.py",
             "tests/test_join_audit.py",
             "tests/test_group_transform.py",
@@ -92,6 +95,8 @@ def main() -> None:
             "tests/test_case_select.py",
             "tests/test_asof.py",
             "tests/test_rank_within.py",
+            "tests/test_pct_change.py",
+            "tests/test_time_resample.py",
             "tests/make_decision_fixture.py",
             "tests/make_join_audit_fixture.py",
             "tests/make_group_transform_fixture.py",
@@ -99,6 +104,9 @@ def main() -> None:
             "tests/make_ordered_cases_fixture.py",
             "tests/make_asof_fixture.py",
             "tests/make_rank_fixture.py",
+            "tests/make_shared_group_fixture.py",
+            "tests/make_growth_fixture.py",
+            "tests/make_time_buckets_fixture.py",
             "tests/fixtures/retail.json",
             "tests/fixtures/reshape.json",
             "tests/fixtures/decisions.json",
@@ -109,6 +117,9 @@ def main() -> None:
             "tests/fixtures/ordered_cases.json",
             "tests/fixtures/asof.json",
             "tests/fixtures/rank.json",
+            "tests/fixtures/shared_group.json",
+            "tests/fixtures/growth.json",
+            "tests/fixtures/time_buckets.json",
             "package-lock.json",
             ".prettierrc.json",
             "examples/sales_story.py",
@@ -127,6 +138,9 @@ def main() -> None:
             "examples/ordered_cases_workflow.py",
             "examples/asof_workflow.py",
             "examples/rank_workflow.py",
+            "examples/growth_workflow.py",
+            "examples/time_buckets_workflow.py",
+            "examples/large_group_workflow.py",
             "docs/v1.md",
             "docs/analysis.md",
             "docs/api.md",
@@ -251,6 +265,25 @@ rank_source = rank_story.table(pd.DataFrame({"g":["one"]*3,"v":[10,10,20]}))
 ranked = rank_source.rank_within("rank",by="g",value="v",method="dense")
 assert ranked.to_pandas()["rank"].tolist() == [2.,2.,1.]
 assert [o.row for o in ranked.explain(0,"rank")] == [0,1,2]
+shared_story = DataStory.for_analysis()
+shared_source = shared_story.table(pd.DataFrame({"g":["A"]*600,"v":range(600)}))
+shared_total = shared_source.group_transform("total",by="g",value="v",op="sum",dropna=False)
+shared_rank = shared_total.rank_within("rank",by="g",value="v")
+shared_payload = shared_story.to_dict(result=shared_rank)
+assert shared_payload["schema_version"] == 2
+assert shared_payload["steps"][-1]["rows"][0]["cell_parents"]["rank"] == []
+assert shared_rank.explain_page(0,"rank",offset=599).origins[0].row == 599
+growth_story = DataStory()
+growth_source = growth_story.table(pd.DataFrame({"v":[0.0,10.0]}))
+growth_result = growth_source.window("change",column="v",op="pct_change")
+assert growth_result.to_pandas()["change"].iloc[1] == float("inf")
+bucket_story = DataStory()
+bucket_source = bucket_story.table(pd.DataFrame({
+    "time":pd.to_datetime(["2026-01-01 10:00","2026-01-01 10:06"]), "v":[1.0,2.0]
+}))
+bucket_result = bucket_source.resample_time(on="time",value="v",rule="3min")
+assert bucket_story.to_dict(result=bucket_result)["steps"][-1]["parameters"]["empty_bins"] == [1]
+assert bucket_result.explain(1,"v") == ()
 print(json.dumps({
     "version": framechoreo.__version__, "python": platform.python_version(),
     "pandas": pd.__version__, "html_bytes": len(html.encode("utf-8")),
@@ -263,6 +296,9 @@ print(json.dumps({
     "ordered_case_rows": len(ordered.to_pandas()),
     "asof_rows": len(near.to_pandas()),
     "rank_rows": len(ranked.to_pandas()),
+    "shared_rows": len(shared_rank.to_pandas()),
+    "growth_rows": len(growth_result.to_pandas()),
+    "bucket_rows": len(bucket_result.to_pandas()),
 }))
 """
     with tempfile.TemporaryDirectory(prefix="framechoreo-dist-") as folder:

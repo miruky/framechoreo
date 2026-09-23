@@ -572,6 +572,7 @@
         ![
           "lag",
           "diff",
+          "pct_change",
           "cumsum",
           "cummin",
           "cummax",
@@ -613,7 +614,7 @@
               ? j >= p.periods
                 ? [group[j - p.periods]]
                 : []
-              : p.op === "diff"
+              : ["diff", "pct_change"].includes(p.op)
                 ? j >= p.periods
                   ? [position, group[j - p.periods]]
                   : [position]
@@ -668,10 +669,12 @@
         !Array.isArray(p.row_groups) ||
         p.row_groups.length !== parent.rows.length ||
         !Array.isArray(p.excluded_rows) ||
+        (p.lineage_encoding !== undefined && p.lineage_encoding !== "shared_group") ||
         step.rows.length !== parent.rows.length
       )
         invalid("invalid grouped row metric");
-      const seen = new Set();
+      const seen = new Set(),
+        compressed = p.lineage_encoding === "shared_group";
       for (const [groupIndex, members] of p.groups.entries()) {
         if (!Array.isArray(members) || !members.length) invalid("empty grouped row metric");
         members.forEach((position, j) => {
@@ -697,10 +700,10 @@
           const row = step.rows[position];
           if (
             !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
-            !sameRefs(row.cell_parents[p.name], candidates) ||
+            !sameRefs(row.cell_parents[p.name], compressed ? [] : candidates) ||
             !record(row.cell_controls) ||
             !sameList(Object.keys(row.cell_controls), [p.name]) ||
-            !sameRefs(row.cell_controls[p.name], keyRefs)
+            !sameRefs(row.cell_controls[p.name], compressed ? [] : keyRefs)
           )
             invalid("inconsistent grouped metric inputs");
         }
@@ -721,7 +724,7 @@
           !sameList(Object.keys(row.cell_controls), [p.name]) ||
           !sameRefs(
             row.cell_controls[p.name],
-            p.by.map((column) => ref(position, column)),
+            compressed ? [] : p.by.map((column) => ref(position, column)),
           )
         )
           invalid("inconsistent excluded group row");
@@ -828,11 +831,13 @@
         typeof p.ascending !== "boolean" ||
         !Array.isArray(p.groups) ||
         !Array.isArray(p.row_groups) ||
+        (p.lineage_encoding !== undefined && p.lineage_encoding !== "shared_group") ||
         p.row_groups.length !== parent.rows.length ||
         step.rows.length !== parent.rows.length
       )
         invalid("invalid ranking settings");
-      const seen = new Set();
+      const seen = new Set(),
+        compressed = p.lineage_encoding === "shared_group";
       for (const [groupIndex, members] of p.groups.entries()) {
         if (!Array.isArray(members) || !members.length) invalid("empty rank group");
         members.forEach((position, j) => {
@@ -853,10 +858,12 @@
         for (const position of members) {
           const row = step.rows[position],
             present = parent.rows[position].cells[columns.indexOf(p.value)].type !== "missing",
-            valueRefs = present ? candidates.map((i) => ref(i, p.value)) : [],
-            keyRefs = present
-              ? candidates.flatMap((i) => p.by.map((column) => ref(i, column)))
-              : [...p.by.map((column) => ref(position, column)), ref(position, p.value)];
+            valueRefs = compressed ? [] : present ? candidates.map((i) => ref(i, p.value)) : [],
+            keyRefs = compressed
+              ? []
+              : present
+                ? candidates.flatMap((i) => p.by.map((column) => ref(i, column)))
+                : [...p.by.map((column) => ref(position, column)), ref(position, p.value)];
           if (
             !sameRefs(row.parents, [{ step: parent.id, row: position }]) ||
             !sameRefs(row.cell_parents[p.name], valueRefs) ||
@@ -872,9 +879,99 @@
       }
       if (seen.size !== parent.rows.length) invalid("rank omitted rows");
     }
+    if (step.operation === "time_resample") {
+      if (
+        !columns.includes(p.on) ||
+        !columns.includes(p.value) ||
+        p.on === p.value ||
+        !namedKeys(p.by, columns, true) ||
+        p.by.includes(p.on) ||
+        p.by.includes(p.value) ||
+        !sameList(step.columns, [...p.by, p.on, p.value]) ||
+        typeof p.rule !== "string" ||
+        !/^[1-9][0-9]*(?:D|h|min|s|ms|us)$/.test(p.rule) ||
+        !["sum", "mean", "min", "max", "count"].includes(p.op) ||
+        !["left", "right"].includes(p.closed) ||
+        !["left", "right"].includes(p.bin_label) ||
+        !["start_day", "start", "epoch"].includes(p.origin) ||
+        !Array.isArray(p.bins) ||
+        p.bins.length !== step.rows.length ||
+        !Array.isArray(p.empty_bins)
+      )
+        invalid("invalid time buckets");
+      const seen = new Set(),
+        empty = [];
+      p.bins.forEach((bin, outputRow) => {
+        const row = step.rows[outputRow];
+        if (
+          !record(bin) ||
+          !Array.isArray(bin.input_rows) ||
+          (bin.key_row !== null &&
+            (!Number.isSafeInteger(bin.key_row) ||
+              bin.key_row < 0 ||
+              bin.key_row >= parent.rows.length)) ||
+          (p.by.length > 0 && bin.key_row === null) ||
+          row.cells[step.columns.indexOf(p.on)].type !== "datetime"
+        )
+          invalid("invalid time bin mapping");
+        if (!bin.input_rows.length) empty.push(outputRow);
+        const inputRows = [];
+        bin.input_rows.forEach((position, j) => {
+          if (
+            !Number.isSafeInteger(position) ||
+            position < 0 ||
+            position >= parent.rows.length ||
+            seen.has(position) ||
+            (j && position <= bin.input_rows[j - 1]) ||
+            parent.rows[position].cells[columns.indexOf(p.on)].type !== "datetime"
+          )
+            invalid("invalid time bin members");
+          seen.add(position);
+          inputRows.push({ step: parent.id, row: position });
+          for (const column of p.by) {
+            const left = parent.rows[position].cells[columns.indexOf(column)],
+              right = parent.rows[bin.key_row].cells[columns.indexOf(column)];
+            if (left.type !== right.type || left.value !== right.value)
+              invalid("time bin contains a different group key");
+          }
+        });
+        const candidates = bin.input_rows.filter(
+          (position) => parent.rows[position].cells[columns.indexOf(p.value)].type !== "missing",
+        );
+        if (
+          !sameRefs(row.parents, inputRows) ||
+          !sameRefs(row.cell_parents[p.on], []) ||
+          !sameRefs(
+            row.cell_parents[p.value],
+            candidates.map((position) => ref(position, p.value)),
+          ) ||
+          !record(row.cell_controls) ||
+          !sameList(Object.keys(row.cell_controls), [p.on, p.value]) ||
+          !sameRefs(
+            row.cell_controls[p.on],
+            bin.input_rows.map((position) => ref(position, p.on)),
+          ) ||
+          !sameRefs(row.cell_controls[p.value], [
+            ...bin.input_rows.map((position) => ref(position, p.on)),
+            ...(bin.key_row === null ? [] : p.by.map((column) => ref(bin.key_row, column))),
+          ])
+        )
+          invalid("inconsistent time bin sources");
+        for (const column of p.by)
+          if (
+            !sameRefs(
+              row.cell_parents[column],
+              bin.key_row === null ? [] : [ref(bin.key_row, column)],
+            )
+          )
+            invalid("inconsistent time bin key");
+      });
+      if (seen.size !== parent.rows.length || !sameList(p.empty_bins, empty))
+        invalid("time bin coverage mismatch");
+    }
   }
   function indexStory(data) {
-    if (!data || data.format !== "framechoreo.story" || data.schema_version !== 1) {
+    if (!data || data.format !== "framechoreo.story" || ![1, 2].includes(data.schema_version)) {
       throw new Error("Unsupported story format");
     }
     const invalid = (reason) => {
@@ -895,6 +992,7 @@
       filter: 1,
       merge: 2,
       merge_asof: 2,
+      time_resample: 1,
       group_sum: 1,
       group_mean: 1,
       group_count: 1,
@@ -1005,6 +1103,13 @@
       });
       const p = step.parameters;
       if (!p || typeof p !== "object" || Array.isArray(p)) invalid("missing operation settings");
+      if (
+        p.lineage_encoding !== undefined &&
+        (data.schema_version !== 2 ||
+          !["group_transform", "rank_within"].includes(step.operation) ||
+          p.lineage_encoding !== "shared_group")
+      )
+        invalid("invalid shared lineage encoding");
       validateWorkflow(step, steps, invalid);
       if (step.profile !== undefined) {
         const profile = step.profile;
@@ -1397,7 +1502,7 @@
         counts.set(key, 1n);
         continue;
       }
-      const refs = step.rows[ref.row].cell_parents[ref.column];
+      const refs = valueParents(steps, ref);
       if (expanded)
         counts.set(
           key,
@@ -1446,7 +1551,7 @@
               cell: row.cells[step.columns.indexOf(ref.column)],
             });
           } else {
-            const refs = row.cell_parents[ref.column];
+            const refs = valueParents(steps, ref);
             for (let i = refs.length - 1; i >= 0; i--) pending.push(refs[i]);
           }
         }
@@ -1489,10 +1594,77 @@
   function cellKey(step, row, column) {
     return JSON.stringify([step, row, column]);
   }
-  function controlInputs(steps, reference) {
+  const sharedGroupCache = new WeakMap();
+  function sharedGroupParents(steps, step, groupIndex) {
+    let cache = sharedGroupCache.get(step);
+    if (!cache) {
+      cache = new Map();
+      sharedGroupCache.set(step, cache);
+    }
+    if (cache.has(groupIndex)) return cache.get(groupIndex);
+    const parent = steps.get(step.parents[0]),
+      p = step.parameters,
+      members = p.groups[groupIndex],
+      candidates = members.filter(
+        (position) =>
+          parent.rows[position].cells[parent.columns.indexOf(p.value)].type !== "missing",
+      ),
+      refs = {
+        values: candidates.map((row) => ({ step: parent.id, row, column: p.value })),
+        keys: (step.operation === "rank_within" ? candidates : members).flatMap((row) =>
+          p.by.map((column) => ({ step: parent.id, row, column })),
+        ),
+      };
+    cache.set(groupIndex, refs);
+    return refs;
+  }
+  function valueParents(steps, reference) {
     const step = validateReference(steps, reference),
-      row = step.rows[reference.row],
-      refs = row.cell_controls?.[reference.column] || row.row_controls || [];
+      p = step.parameters;
+    if (
+      p.lineage_encoding === "shared_group" &&
+      ["group_transform", "rank_within"].includes(step.operation) &&
+      reference.column === p.name
+    ) {
+      const group = p.row_groups[reference.row];
+      if (group === null) return [];
+      if (
+        step.operation === "rank_within" &&
+        steps.get(step.parents[0]).rows[reference.row].cells[step.columns.indexOf(p.value)].type ===
+          "missing"
+      )
+        return [];
+      return sharedGroupParents(steps, step, group).values;
+    }
+    return step.rows[reference.row].cell_parents[reference.column] || [];
+  }
+  function decisionParents(steps, reference) {
+    const step = validateReference(steps, reference),
+      p = step.parameters,
+      row = step.rows[reference.row];
+    if (
+      p.lineage_encoding === "shared_group" &&
+      ["group_transform", "rank_within"].includes(step.operation) &&
+      reference.column === p.name
+    ) {
+      const group = p.row_groups[reference.row],
+        parent = steps.get(step.parents[0]);
+      if (group === null)
+        return p.by.map((column) => ({ step: parent.id, row: reference.row, column }));
+      if (
+        step.operation === "rank_within" &&
+        parent.rows[reference.row].cells[parent.columns.indexOf(p.value)].type === "missing"
+      )
+        return [
+          ...p.by.map((column) => ({ step: parent.id, row: reference.row, column })),
+          { step: parent.id, row: reference.row, column: p.value },
+        ];
+      return sharedGroupParents(steps, step, group).keys;
+    }
+    return row.cell_controls?.[reference.column] || row.row_controls || [];
+  }
+  function controlInputs(steps, reference) {
+    const refs = decisionParents(steps, reference);
     return refs.map((ref) => {
       const source = steps.get(ref.step);
       return {
@@ -1509,7 +1681,7 @@
       const step = validateReference(steps, reference),
         row = step.rows[reference.row],
         m = metrics(step).find((m) => m.output === reference.column),
-        refs = row.cell_parents[reference.column] || [];
+        refs = valueParents(steps, reference);
       let text;
       if (step.operation === "case_when" && reference.column === step.parameters.name) {
         const outcome = step.parameters.outcomes[reference.row];
@@ -1549,9 +1721,12 @@
         const op = step.parameters.op;
         if (op === "lag" && refs.length === 0)
           text = "このグループに指定した距離の前の行がないため、結果は欠損です。";
-        else if (op === "diff" && refs.length === 1)
+        else if (["diff", "pct_change"].includes(op) && refs.length === 1)
           text =
-            "比較対象の前の行がないため差分は欠損です。現在の値だけを入力として記録しています。";
+            "比較対象の前の行がないため結果は欠損です。現在の値だけを入力として記録しています。";
+        else if (op === "pct_change")
+          text =
+            "現在値÷前の値−1で求める相対変化です。百分率にするには100倍します。欠損や分母0もpandasの結果をそのまま示します。";
         else if (op.startsWith("rolling_") && refs.length < step.parameters.min_periods)
           text =
             "窓内の有効な値が" +
@@ -1639,6 +1814,13 @@
           step.parameters.audit.matched_right_rows[reference.row] === null
             ? "指定した方向・許容距離に合う右側の行がありません。左側の時刻とグループを確認できます。"
             : "時刻とグループで選ばれた右側の行から値を取りました。照合に使ったキーは判定入力に表示します。";
+      else if (step.operation === "time_resample" && reference.column === step.parameters.value)
+        text = step.parameters.empty_bins.includes(reference.row)
+          ? "この時間枠に入力行はありません。値の入力元を捏造せず、空の枠をそのまま表示します。"
+          : "この時間枠の欠損でない値だけを集計しました。所属を決めた時刻とグループキーは判定入力として表示します。";
+      else if (step.operation === "time_resample" && reference.column === step.parameters.on)
+        text =
+          "この時刻は枠のラベルとしてpandasが生成したものです。元の時刻セルをコピーした値ではありません。";
       else
         text =
           "変換前の入力セルをたどれます。読み取りに失敗して欠損になった場合も、元の文字列を確認できます。";
@@ -1685,6 +1867,16 @@
               " was selected by the ordered key and group. The compared keys are separate decision inputs.",
       };
     }
+    if (step.operation === "time_resample" && reference.column === p.value)
+      return {
+        text: p.empty_bins.includes(reference.row)
+          ? "No input row falls in this time bucket. The empty bucket keeps its pandas result without an invented source."
+          : "This time bucket aggregates its non-missing value inputs. Timestamps and group keys are separate membership controls.",
+      };
+    if (step.operation === "time_resample" && reference.column === p.on)
+      return {
+        text: "Pandas generated this bucket-edge label. It is not a copied timestamp from an input row.",
+      };
     if (step.operation === "filter_by")
       return {
         text: "This row passed the condition. Its deciding inputs are separate from its copied value inputs.",
@@ -1696,18 +1888,18 @@
           : "The " +
             p.op +
             " considered " +
-            row.cell_parents[p.name].length +
+            valueParents(steps, reference).length +
             " non-missing group candidates and repeats the metric beside each member. Group keys are separate decision inputs.",
       };
     if (step.operation === "rank_within" && reference.column === p.name)
       return {
         text:
-          row.cell_parents[p.name].length === 0
+          valueParents(steps, reference).length === 0
             ? "The current value is missing, so its rank is missing. The missing value and group keys remain decision inputs."
             : "The " +
               p.method +
               " rank compares " +
-              row.cell_parents[p.name].length +
+              valueParents(steps, reference).length +
               " non-missing group candidates, including ties. " +
               (p.ascending ? "Lower values rank first." : "Higher values rank first."),
       };
@@ -1717,9 +1909,13 @@
         return {
           text: "No earlier row exists at this lag within the group; the result is missing.",
         };
-      if (p.op === "diff" && count === 1)
+      if (["diff", "pct_change"].includes(p.op) && count === 1)
         return {
-          text: "No earlier comparison row exists; only the current value is recorded and the difference is missing.",
+          text: "No earlier comparison row exists; only the current value is recorded and the result is missing.",
+        };
+      if (p.op === "pct_change")
+        return {
+          text: "Fractional change is current divided by the earlier value, minus one. Multiply by 100 for a percentage. Missing inputs and zero denominators follow pandas.",
         };
       if (p.op.startsWith("rolling_") && count < p.min_periods)
         return {
@@ -1892,6 +2088,7 @@
         const group = step.parameters.row_groups[position];
         return group === null ? null : { step: stepId, row: group };
       }
+      if (step.operation === "time_resample") return { step: stepId, row: position };
       if (["source", "concat", "pivot", "melt"].includes(step.operation)) return null;
       const parent = row.parents.find((r) => r.step === step.parents[0]);
       if (!parent) return null;
@@ -1901,6 +2098,14 @@
     return null;
   }
   function groupTitle(scene, groupIndex) {
+    if (scene.step.operation === "time_resample") {
+      const step = scene.step,
+        row = step.rows[groupIndex],
+        p = step.parameters,
+        time = row.cells[step.columns.indexOf(p.on)].display,
+        group = p.by.map((key) => key + ": " + row.cells[step.columns.indexOf(key)].display);
+      return [...group, p.on + ": " + time].join(" · ");
+    }
     const rowPosition = ["group_transform", "rank_within"].includes(scene.step.operation)
       ? scene.step.parameters.groups[groupIndex][0]
       : groupIndex;
@@ -2005,6 +2210,26 @@
         p.size +
         ", min_periods=" +
         p.min_periods +
+        ")"
+      );
+    if (scene.kind === "time_resample")
+      return (
+        "resample_time(on=" +
+        JSON.stringify(p.on) +
+        ", value=" +
+        JSON.stringify(p.value) +
+        ", rule=" +
+        JSON.stringify(p.rule) +
+        ", op=" +
+        JSON.stringify(p.op) +
+        ", by=" +
+        JSON.stringify(p.by) +
+        ", closed=" +
+        JSON.stringify(p.closed) +
+        ", bin_label=" +
+        JSON.stringify(p.bin_label) +
+        ", origin=" +
+        JSON.stringify(p.origin) +
         ")"
       );
     if (scene.kind === "group_transform")
@@ -2203,6 +2428,7 @@
     rowKey,
     cellKey,
     cellExplanation,
+    valueParents,
     controlInputs,
     conditionFields,
     conditionBreakdown,

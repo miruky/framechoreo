@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0rc5 — Unpublished candidate
+
+- Share candidate references for large `group_transform` and `rank_within` steps in display schema version 2, retaining exact value and decision origins without quadratic JSON growth. The player still reads schema version 1 stories.
+- Add fractional `pct_change` windows with no implicit missing-value fill, including explicit current and earlier operands and zero-denominator results.
+- Add fixed-width `resample_time` with grouped bins, left/right boundary and label controls, native pandas aggregates, empty intervals, and exact positional bucket membership.
+- Add large-group, fractional-change, and time-bucket examples with Python, player, cross-language, browser, and fresh-install checks.
+
 ## 1.0.0rc4 — Unpublished candidate
 
 - Add ordered multi-branch decisions with first-true priority, explicit missing-check behavior, per-branch outcomes, and separate value and decision inputs.

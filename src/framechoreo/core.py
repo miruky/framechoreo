@@ -7,8 +7,10 @@ import io
 import json
 import math
 import operator
+import re
 from collections.abc import Callable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +21,7 @@ from .encoding import cell_signature, encode_cell, validate_text
 from .errors import CaptureLimitError, UnsupportedDataError
 from .profile import profile_frame
 
-VERSION = "1.0.0rc4"
+VERSION = "1.0.0rc5"
 
 
 @dataclass(frozen=True, slots=True)
@@ -623,9 +625,14 @@ class DataStory:
             parents = self._step(sid).parents
             sid = parents[0] if parents else None
         timeline.reverse()
+        steps = [step for step in self._steps if step.id in required]
         return {
             "format": "framechoreo.story",
-            "schema_version": 1,
+            "schema_version": (
+                2
+                if any(step.parameters.get("lineage_encoding") == "shared_group" for step in steps)
+                else 1
+            ),
             "library_version": VERSION,
             "pandas_version": pd.__version__,
             "title": self.title,
@@ -633,7 +640,7 @@ class DataStory:
             "description": self.description,
             "result": result_id,
             "timeline": timeline,
-        }, [step for step in self._steps if step.id in required]
+        }, steps
 
     @staticmethod
     def _step_header(step: _Step, presentation: dict[str, Any]) -> dict[str, Any]:
@@ -654,13 +661,22 @@ class DataStory:
     def _row_record(step: _Step, i: int, values: tuple[Any, ...]) -> dict[str, Any]:
         refs = step.row_parents[i] if step.row_parents else ()
         cell_refs = step.cell_parents[i] if step.cell_parents else {}
+        shared_name = (
+            step.parameters["name"]
+            if step.parameters.get("lineage_encoding") == "shared_group"
+            else None
+        )
         record = {
             "id": f"{step.id}:{i}",
             "position": i,
             "cells": [encode_cell(v) for v in values],
             "parents": [{"step": r.step, "row": r.row} for r in refs],
             "cell_parents": {
-                col: [{"step": r.step, "row": r.row, "column": r.column} for r in rr]
+                col: (
+                    []
+                    if col == shared_name
+                    else [{"step": r.step, "row": r.row, "column": r.column} for r in rr]
+                )
                 for col, rr in cell_refs.items()
             },
         }
@@ -670,7 +686,11 @@ class DataStory:
             ]
         if step.cell_controls:
             record["cell_controls"] = {
-                col: [{"step": r.step, "row": r.row, "column": r.column} for r in rr]
+                col: (
+                    []
+                    if col == shared_name
+                    else [{"step": r.step, "row": r.row, "column": r.column} for r in rr]
+                )
                 for col, rr in step.cell_controls[i].items()
             }
         return record
@@ -1667,7 +1687,7 @@ class StoryFrame:
         min_periods: int | None = None,
         label: str = "Calculate over ordered rows",
     ) -> StoryFrame:
-        """Record lag, difference, cumulative, or trailing rolling statistics.
+        """Record lag, difference, fractional change, or cumulative/rolling statistics.
 
         The input order is the current row order; call ``sort_values`` first for
         chronological work. Explicit per-cell references are limited so an
@@ -1684,6 +1704,7 @@ class StoryFrame:
         if op not in (
             "lag",
             "diff",
+            "pct_change",
             "cumsum",
             "cummin",
             "cummax",
@@ -1733,6 +1754,8 @@ class StoryFrame:
                 calculated = None
             elif op == "diff":
                 calculated = series.diff(periods)
+            elif op == "pct_change":
+                calculated = series.pct_change(periods=periods, fill_method=None)
             elif op in ("cumsum", "cummin", "cummax"):
                 calculated = getattr(series, op)()
             else:
@@ -1745,7 +1768,7 @@ class StoryFrame:
                 window_positions = positions[max(0, j - size + 1) : j + 1]
                 if op == "lag":
                     members = [positions[j - periods]] if j >= periods else []
-                elif op == "diff":
+                elif op in ("diff", "pct_change"):
                     members = [position, positions[j - periods]] if j >= periods else [position]
                 elif op in ("cumsum", "cummin", "cummax"):
                     members = (
@@ -1822,8 +1845,8 @@ class StoryFrame:
         """Broadcast one pandas group metric without collapsing the original rows.
 
         Every non-missing candidate in a group is an input to its repeated
-        metric. Grouping-key cells are separate decision inputs. A large
-        broadcast raises rather than silently dropping provenance.
+        metric. Grouping-key cells are separate decision inputs. Large
+        broadcasts share their candidate lists in the exported display model.
         """
         df = self.to_pandas()
         if not isinstance(name, str) or not name.strip() or name in df.columns:
@@ -1875,8 +1898,6 @@ class StoryFrame:
             )
             group_keys = tuple(_CellRef(self.step_id, i, key) for i in members for key in keys)
             reference_count += len(members) * (len(candidates) + len(group_keys))
-            if reference_count > 250_000:
-                raise CaptureLimitError("Group transform exceeds 250,000 provenance references")
             for i in members:
                 row_groups[i] = group_index
                 inputs[i] = candidates
@@ -1884,8 +1905,6 @@ class StoryFrame:
         for i in excluded:
             controls[i] = tuple(_CellRef(self.step_id, i, key) for key in keys)
             reference_count += len(keys)
-            if reference_count > 250_000:
-                raise CaptureLimitError("Group transform exceeds 250,000 provenance references")
         df[name] = calculated.array
         original = self._snapshot.frame.columns
         parameters = {
@@ -1900,6 +1919,8 @@ class StoryFrame:
         }
         if op == "sum":
             parameters["min_count"] = minimum
+        if reference_count > 250_000:
+            parameters["lineage_encoding"] = "shared_group"
         return self._story._add(
             df,
             name="Grouped row metric",
@@ -1972,8 +1993,6 @@ class StoryFrame:
                         _CellRef(self.step_id, i, value),
                     )
                 reference_count += len(inputs[i]) + len(controls[i])
-                if reference_count > 250_000:
-                    raise CaptureLimitError("Rank exceeds 250,000 provenance references")
         df[name] = calculated.array
         original = self._snapshot.frame.columns
         return self._story._add(
@@ -1996,6 +2015,7 @@ class StoryFrame:
                 "ascending": ascending,
                 "groups": groups,
                 "row_groups": row_groups,
+                **({"lineage_encoding": "shared_group"} if reference_count > 250_000 else {}),
             },
         )
 
@@ -2309,6 +2329,153 @@ class StoryFrame:
         if step.operation != "merge_asof":
             raise ValueError("asof_audit requires a merge_asof result")
         return copy.deepcopy(step.parameters["audit"])
+
+    def resample_time(
+        self,
+        *,
+        on: str,
+        value: str,
+        rule: str,
+        op: str = "sum",
+        by: str | Sequence[str] | None = None,
+        closed: str = "left",
+        bin_label: str = "left",
+        origin: str = "start_day",
+        label: str = "Summarize values in time buckets",
+    ) -> StoryFrame:
+        """Aggregate fixed-width pandas time bins with exact positional membership.
+
+        Input timestamps must be sorted; empty bins are retained. Bin labels
+        are generated by pandas and have no invented copied value cell.
+        """
+        df = self.to_pandas()
+        _keys([on, value], df.columns)
+        keys = [] if by is None else _keys(by, df.columns)
+        if on == value or on in keys or value in keys:
+            raise ValueError("Time, value, and grouping fields must be distinct")
+        if not pd.api.types.is_datetime64_any_dtype(df[on].dtype):
+            raise UnsupportedDataError("resample_time requires a datetime column")
+        if df[on].isna().any() or not df[on].is_monotonic_increasing:
+            raise ValueError("Time values must be present and sorted ascending")
+        matched_rule = (
+            re.fullmatch(r"([1-9][0-9]*)(D|h|min|s|ms|us)", rule) if isinstance(rule, str) else None
+        )
+        if matched_rule is None:
+            raise ValueError("rule must be a positive fixed-width pandas frequency")
+        if op not in ("sum", "mean", "min", "max", "count"):
+            raise ValueError("Unsupported time aggregation")
+        if op != "count" and (
+            not pd.api.types.is_numeric_dtype(df[value].dtype)
+            or pd.api.types.is_bool_dtype(df[value].dtype)
+        ):
+            raise UnsupportedDataError("This time aggregation requires numeric values")
+        if closed not in ("left", "right") or bin_label not in ("left", "right"):
+            raise ValueError("closed and bin_label must be left or right")
+        if origin not in ("start_day", "start", "epoch"):
+            raise ValueError("origin must be start_day, start, or epoch")
+        groups = (
+            [
+                sorted(int(i) for i in positions)
+                for positions in df.groupby(
+                    keys, sort=False, dropna=False, observed=True
+                ).indices.values()
+            ]
+            if keys
+            else [list(range(len(df)))]
+        )
+        amount, unit = matched_rule.groups()
+        duration_field = {
+            "D": "days",
+            "h": "hours",
+            "min": "minutes",
+            "s": "seconds",
+            "ms": "milliseconds",
+            "us": "microseconds",
+        }[unit]
+        try:
+            interval = timedelta(**{duration_field: int(amount)})
+        except OverflowError as exc:
+            raise ValueError("rule is too large for a fixed-width interval") from exc
+        estimated_rows = 0
+        for positions in groups:
+            if positions:
+                span = df[on].array[positions[-1]] - df[on].array[positions[0]]
+                estimated_rows += int(span / interval) + 3
+                if estimated_rows > self._story.max_rows * 2 + len(groups) * 2:
+                    raise CaptureLimitError("Time range would create too many buckets")
+        chunks = []
+        bins = []
+        row_parents = []
+        cell_parents = []
+        cell_controls = []
+        for positions in groups:
+            part = df.iloc[positions]
+            resampler = part.resample(rule, on=on, closed=closed, label=bin_label, origin=origin)
+            selected = resampler[value]
+            calculated = selected.sum(min_count=1) if op == "sum" else getattr(selected, op)()
+            output_part = calculated.reset_index()
+            key_row = positions[0] if positions else None
+            for key in reversed(keys):
+                output_part.insert(0, key, df[key].array[key_row] if key_row is not None else None)
+            indices = resampler.indices
+            for bucket in output_part[on].array:
+                members = [positions[int(local)] for local in indices.get(bucket, [])]
+                candidates = [i for i in members if pd.notna(df[value].array[i])]
+                row_parents.append(tuple(_RowRef(self.step_id, i) for i in members))
+                cell_parents.append(
+                    {
+                        **{
+                            key: (
+                                (_CellRef(self.step_id, key_row, key),)
+                                if key_row is not None
+                                else ()
+                            )
+                            for key in keys
+                        },
+                        on: (),
+                        value: tuple(_CellRef(self.step_id, i, value) for i in candidates),
+                    }
+                )
+                controls = tuple(
+                    [_CellRef(self.step_id, i, on) for i in members]
+                    + (
+                        [_CellRef(self.step_id, key_row, key) for key in keys]
+                        if key_row is not None
+                        else []
+                    )
+                )
+                cell_controls.append(
+                    {on: tuple(_CellRef(self.step_id, i, on) for i in members), value: controls}
+                )
+                bins.append({"input_rows": members, "key_row": key_row})
+            chunks.append(output_part)
+        output = (
+            pd.concat(chunks, ignore_index=True)
+            if chunks
+            else df[[*keys, on, value]].iloc[:0].copy().reset_index(drop=True)
+        )
+        return self._story._add(
+            output,
+            name="Time buckets",
+            operation="time_resample",
+            label=label,
+            parents=(self.step_id,),
+            row_parents=tuple(row_parents),
+            cell_parents=tuple(cell_parents),
+            cell_controls=tuple(cell_controls),
+            parameters={
+                "on": on,
+                "value": value,
+                "by": keys,
+                "rule": rule,
+                "op": op,
+                "closed": closed,
+                "bin_label": bin_label,
+                "origin": origin,
+                "bins": bins,
+                "empty_bins": [i for i, item in enumerate(bins) if not item["input_rows"]],
+            },
+        )
 
     def _group_keys_and_value(
         self, df: pd.DataFrame, by: str | Sequence[str], value: str

@@ -272,16 +272,19 @@ average = running.window(
 )
 ```
 
-`op` is `lag`, `diff`, `cumsum`, `cummin`, `cummax`, `rolling_sum`,
+`op` is `lag`, `diff`, `pct_change`, `cumsum`, `cummin`, `cummax`, `rolling_sum`,
 `rolling_mean`, `rolling_min`, or `rolling_max`. `by` is optional
 and partitions rows by one or more keys, including missing keys. The current
 row order is the calculation order; this method does not sort dates. `periods`
-is a positive row offset for `lag`/`diff`; `size` is a positive number of rows
+is a positive row offset for `lag`/`diff`/`pct_change`; `size` is a positive number of rows
 for the four rolling operations. Fixed rolling windows default to
 `min_periods=size`; an explicit value from zero through `size` is accepted.
 `lag` accepts any supported scalar column. Other operations require a numeric,
 non-boolean column. Actual results and dtype follow pandas' corresponding
-operations. `diff` records both arithmetic operands; cumulative and rolling
+operations. `diff` and `pct_change` record both arithmetic operands. The latter
+uses pandas' fractional change, current divided by the earlier value minus one;
+multiply by 100 for a percentage. Missing operands and division by zero retain
+pandas' result. Cumulative and rolling
 metrics record their non-missing candidate values, including those considered
 for a minimum or maximum. Group-key and missing-window decisions are kept
 separately. Cumulative results at a missing current row have no value input
@@ -368,6 +371,42 @@ eligible or rejected right candidate. The player offers links to unmatched,
 unused, reused, and selected input rows. It validates positional references
 but does not independently re-run pandas' nearest-key selection in JavaScript.
 
+### resample_time
+
+```python
+buckets = readings.resample_time(
+    on="time",
+    value="reading",
+    rule="3min",
+    by="sensor",
+    op="mean",
+    closed="left",
+    bin_label="left",
+    origin="start_day",
+)
+```
+
+The datetime `on` column must have no missing values and be sorted globally in
+ascending order. `by` optionally separates one or more grouping columns;
+missing group keys form a group. The supported fixed-width rules are a positive
+number followed by `D`, `h`, `min`, `s`, `ms`, or `us`. Calendar-dependent month
+and quarter rules are outside this method. `closed` chooses which bin edge is
+included, and `bin_label` chooses which edge names the result. Both are
+`left` or `right`. `origin` is `start_day`, `start`, or `epoch`.
+
+`op` is `sum`, `mean`, `min`, `max`, or `count`. `sum` uses `min_count=1`, so an
+empty or all-missing bucket is missing; `count` reports zero. All but `count`
+require numeric non-boolean values. pandas computes the output, including
+time-zone behavior and empty intervals. An extreme span that would create too
+many buckets is rejected before resampling; normal capture budgets still apply.
+
+The output has `by` columns, the generated time-label column, then the metric.
+Each metric traces its non-missing input values; timestamps and group keys are
+separate membership controls. A generated bin label has no copied value input.
+Empty bins remain visible and have no invented source row. The player checks
+recorded positional membership but does not independently recompute pandas'
+calendar arithmetic from the display text.
+
 ### group_sum
 
 ```python
@@ -437,9 +476,11 @@ preserved. Pandas computes each result and dtype.
 Each repeated metric traces the group's non-missing candidate value cells.
 Grouping-key cells are distinct control inputs; an excluded row has no group
 value input and retains its own missing key as control. Group numbers and colors
-continue through subsequent row-preserving steps. A group broadcast can multiply
-the number of explicit references, so this operation raises `CaptureLimitError`
-above 250,000 value/control references rather than silently sampling them.
+continue through subsequent row-preserving steps. When the repeated reference
+count exceeds 250,000, the export records one shared candidate set per group
+instead of copying it into every row. Python and the bundled player still return
+exact value-input pages. Such exports use display schema version 2; the current
+player also reads older schema version 1 stories.
 
 ### rank_within
 
@@ -454,8 +495,8 @@ computes the rank and dtype with missing values kept unranked. Every
 non-missing candidate in the row's group is a value input, including tied
 values; group-key cells are separate decision inputs. A missing current value
 has no rank value input and retains that source value as decision context.
-Group numbers and colors survive subsequent sorting. Explicit provenance is
-bounded at 250,000 references for this operation.
+Group numbers and colors survive subsequent sorting. Large ranks use the same
+shared-group encoding as `group_transform`, with exact paged input origins.
 
 For text cells, the player distinguishes empty strings and whitespace-only strings
 with a small label. These values use JSON-style quoting in the table and inspector,
@@ -490,7 +531,7 @@ highlights while keeping repeated origins in the displayed provenance list.
 `explain_controls` returns the current step's deciding source-cell uses separately
 from `explain`'s value inputs. It applies to `case_when`, `case_select`,
 `filter_by`, `coalesce`, `window`, `group_transform`, `merge_asof` right values,
-and `rank_within`. Other steps return an
+`time_resample`, and `rank_within`. Other steps return an
 empty tuple; in particular, it does not infer dependencies inside an arbitrary
 `filter_rows` callback. The browser lists at most 24 immediate decision inputs
 in one view, with their input table and row. Python can return all raw control

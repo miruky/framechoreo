@@ -12,7 +12,7 @@
 
 ## インストール
 
-1.0.0rc4のローカル候補版です。まだ公開していません。
+1.0.0rc5のローカル候補版です。まだ公開していません。
 Python 3.11以上で、ソースのルートから実行します。
 
 ```sh
@@ -23,7 +23,7 @@ python examples/sales_story.py
 配布用wheelから入れる場合は次のとおりです。
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc4-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc5-py3-none-any.whl
 ```
 
 同じ版番号の未公開wheelを以前に導入している場合は、上のコマンドに
@@ -68,9 +68,14 @@ python -m pip install dist/framechoreo-1.0.0rc4-py3-none-any.whl
 `merge_asof()`は時刻などの昇順キーで、前・後・最も近い右行を選びます。
 `asof_audit()`で選ばれなかった行や再利用された右行を確認できます。
 `rank_within()`は同順位の方式を選び、グループ内順位の候補をたどれます。
+大きなグループでは`group_transform()`と`rank_within()`の候補を共有して記録します。
+各行で同じ入力元を複製しないため、5万行の一つのグループでも値の出所をページで確認できます。
+`resample_time()`は時刻を固定幅の枠へ集計し、空の時間枠も残します。
+時刻の枠ラベルと、集計に入った元の値・時刻を区別して表示します。
 
 `window()` では現在の行順で、グループ別の前行値・差分・累計合計・累積最小/最大・
 移動合計/平均/最小/最大を説明できます。日時順の分析なら先に `sort_values()` を使ってください。
+`op="pct_change"`は現在値÷前の値−1という相対変化です。百分率にする場合は100倍します。
 以下で、条件分岐から補完、窓計算、除外行の確認まで一通りのデモを生成します。
 
 ```sh
@@ -81,9 +86,11 @@ python examples/group_transform_workflow.py
 python examples/ordered_cases_workflow.py
 python examples/asof_workflow.py
 python examples/rank_workflow.py
+python examples/growth_workflow.py
+python examples/time_buckets_workflow.py
 ```
 
-累計では説明用の入力参照が急増するため、1工程あたり25万参照を超える場合は
+累計では説明用の入力参照が急増するため、窓計算の1工程で25万参照を超える場合は
 `CaptureLimitError` を出します。値や参照を黙って省略しません。
 
 一時停止は行の動きと再生時間を止め、再開・速度変更でも途中の位置を保ちます。
@@ -123,6 +130,7 @@ story.export_html("story.html", result=total, overwrite=True)
 
 ```sh
 python examples/large_analysis.py --rows 50000
+python examples/large_group_workflow.py --rows 50000
 ```
 
 `examples/generated/analysis.html`に、5万件の売上計算から地域別ランキングまでの

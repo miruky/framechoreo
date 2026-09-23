@@ -12,7 +12,7 @@ is needed to replay it.
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
-result was made. **1.0.0rc4 is a local release candidate; it has not been published.**
+result was made. **1.0.0rc5 is a local release candidate; it has not been published.**
 Operations are explicit; pandas computes their table and numeric results. [The 1.0 guide](docs/v1.md)
 defines the supported workflow, reader features, and compatibility boundaries.
 
@@ -28,7 +28,7 @@ python -m pip install .
 Or install the prepared wheel:
 
 ```sh
-python -m pip install dist/framechoreo-1.0.0rc4-py3-none-any.whl
+python -m pip install dist/framechoreo-1.0.0rc5-py3-none-any.whl
 ```
 
 If you installed an earlier unreleased wheel with the same version, add
@@ -104,14 +104,15 @@ iframe through `_repr_html_()`.
 | `case_when(name, column=..., op=..., value=..., then=..., otherwise=...)` | Chooses a value while separating the chosen value input from comparison inputs; `col("field")` denotes a column operand |
 | `case_select(name, cases=[...], otherwise=...)` | Checks ordered rules and uses the first true branch; a missing check continues to the next branch |
 | `coalesce(name, [...], default=...)` | Takes the first non-missing field in each row and shows every checked candidate |
-| `window(name, column=..., op=..., by=...)` | Grouped lag/difference, cumulative sum/min/max, and rolling sum/mean/min/max in current row order |
+| `window(name, column=..., op=..., by=...)` | Grouped lag/difference/fractional change, cumulative sum/min/max, and rolling sum/mean/min/max in current row order |
 | `merge(...)` / `join_audit()` | Left/inner/right/outer with validated cardinality; inspect unmatched inputs, fanout, duplicate keys, and missing-key matches |
 | `merge_asof(...)` / `asof_audit()` | Sorted nearby-key join with backward/forward/nearest choices, tolerance, exact-match policy, and selected-right-row audit |
+| `resample_time(on=..., value=..., rule=..., by=...)` | Fixed-width time buckets with explicit boundary/label policy, native pandas aggregations, and visible empty intervals |
 | `group_sum(by=..., value=..., dropna=...)` | Numeric non-boolean values, explicit missing-key policy, `min_count=1` by default, observed categorical groups |
 | `group_mean(by=..., value=..., dropna=...)` | Numeric non-boolean values; a group with no non-missing values is missing, since pandas skips missing values with no `min_count` to set |
 | `group_count(by=..., value=..., dropna=...)` | Counts non-missing entries of any supported column type per group; this is not the row count, and a fully missing group counts as zero |
-| `group_transform(name, by=..., value=..., op=..., dropna=...)` | Repeat a group's sum/mean/min/max/count/nunique beside each original row with exact candidate inputs |
-| `rank_within(name, value=..., by=..., method=...)` | Rank numeric values globally or per group with five explicit tie methods and candidate provenance |
+| `group_transform(name, by=..., value=..., op=..., dropna=...)` | Repeat a group's sum/mean/min/max/count/nunique beside each original row; large groups share exact candidate references |
+| `rank_within(name, value=..., by=..., method=...)` | Rank numeric values globally or per group with five tie methods and shared candidate provenance for large groups |
 | `calculate(name, left=..., op=..., right=...)` | Row-wise add/subtract/multiply/divide with a numeric column or scalar; records actual operands |
 | `sort_values(by, ...)` | Stable sorting with retained positional provenance |
 | `select_columns([...])` / `rename_columns({...})` | Choose, reorder, and rename columns while retaining their inputs |
@@ -148,7 +149,9 @@ false or missing comparisons and opens the original row. These features are
 illustrated by `python examples/decision_window_workflow.py`. A long cumulative
 calculation can exceed the separate 250,000-reference provenance cap and raises
 instead of exporting a partial explanation.
-The same cap applies when a `group_transform` repeats a large group metric.
+Large `group_transform` and `rank_within` steps use shared group references in
+schema version 2, retaining exact source pages without duplicating every group
+candidate in each output row. The player still reads older schema version 1 files.
 Compound rules and join audits have their own complete examples.
 Selecting a value brings its origins into view and moves keyboard focus there.
 **Back to selected cell** restores the table and row, including an expanded row view.
@@ -171,6 +174,10 @@ for larger payloads and uses the browser's built-in gzip support; use
 
 Run `python examples/large_analysis.py --rows 50000` for a complete calculation,
 filter, join, aggregation, ranking, column selection, and renaming example.
+Run `python examples/large_group_workflow.py --rows 50000` to broadcast and rank
+a 50,000-row group with exact, paged value origins. For time-series analysis,
+`examples/growth_workflow.py` and `examples/time_buckets_workflow.py` show
+fractional change and fixed-width bucket membership.
 See [analysis and scale](docs/analysis.md) for the API, measurements, and memory limits.
 
 ## What the file contains

@@ -1,4 +1,4 @@
-# Validation scope for 1.0.0rc4
+# Validation scope for 1.0.0rc5
 
 This is an unpublished local candidate checked on macOS on 2026-09-23. It is not a
 claim of universal pandas coverage, cross-browser certification, or demonstrated
@@ -6,7 +6,7 @@ teaching effectiveness. [The 1.0 guide](v1.md) defines the intended surface.
 
 ## Python and pandas
 
-The complete **274-test Python suite** passed in all five local environments:
+The complete **285-test Python suite** passed in all five local environments:
 
 | Python | pandas | NumPy |
 |---|---|---|
@@ -27,7 +27,7 @@ duplicate indices, right-only join rows, missing schema fields, repeated frames,
 nullable types, UTC conversion, reserved/prototype-like field names, rejected
 arguments, and expansion beyond capture limits. The reserved-name regression
 confirmed that a metric named `func` must not become a pandas method argument.
-The new tests compare conditional choices, first-present fallback, nine window
+The tests compare conditional choices, first-present fallback, ten window
 operations, and explicit filtering against pandas. Randomized cases cover nullable
 values and group boundaries across 35 generated cases. A 1,000-row cumulative
 example confirms that the 250,000-reference guard fails without appending a
@@ -37,8 +37,8 @@ The rc3 cases cover unmatched inputs on both sides of inner/outer joins,
 one-to-many fanout, null-key matching, row-preserving group metrics,
 all-missing/empty groups, and compound three-valued conditions with range and
 membership clauses. All 27 combinations of three nullable booleans are checked
-against pandas. Group broadcasts fail clearly before 250,000 explicit
-references, with no partial step appended.
+against pandas. Large group broadcasts now use shared references instead of
+stopping at 250,000 repeated entries.
 The rc4 cases compare all three as-of directions against pandas, including
 group restrictions, datetime tolerance, exact-match exclusion, a self-join,
 empty inputs, duplicate right timestamps, equidistant matches, and duplicate
@@ -47,9 +47,12 @@ column values, copied decision reports, invalid
 requests, default column values, and an empty table. Rank tests compare all five
 tie policies in both sort directions with missing values and duplicate indices;
 missing grouping keys are also checked against pandas. Rejected options must
-leave the story unchanged. Global rank and the explicit-reference limit are
-also exercised. A regression
+leave the story unchanged. Global rank is also exercised. A regression
 uses `datetime.timedelta` to keep pandas 2.2 with current NumPy warning-clean.
+The rc5 cases compare grouped `pct_change` with missing values and a zero
+denominator, fixed-width resampling with empty bins, right-closed UTC bins,
+invalid time spans, and positional inputs. Large group metrics and ranks now
+retain exact late source pages after switching to shared references.
 
 ## Browser model and controls
 
@@ -63,12 +66,14 @@ conditional/window/coalesce references, the excluded-row audit, and source-row
 navigation, join audit links, group-colored repeated metrics, and nested
 condition-tree validation. Atomic comparison outcomes are recombined into the
 final decision. rc4 adds malformed branch, nearby-join and rank-reference
-checks and verifies their visible inspector and audit controls. **149 JavaScript
-tests** passed.
+checks and verifies their visible inspector and audit controls. rc5 adds shared
+schema validation, time-bin coverage, fractional-change inputs, and their visible
+player controls. **156 JavaScript tests** passed.
 Synthetic rectangles test correspondence; they do not measure browser CSS layout.
 
-The Python/JavaScript wire check compares **1,193 value cells, 174 control-source
-uses**, and a page near the end of 10^18 logical repeated source uses. This is
+The Python/JavaScript wire check compares **1,235 value cells, 1,391 control-source
+uses**, a page near the end of 10^18 logical repeated source uses, and a late
+page from shared group lineage. The 10^18 case is
 a small repeated-reference graph, not 10^18 physical rows. The checks include
 the new operations, schema gaps, reserved metric names, and repeated inputs. No
 tests are skipped to accommodate a result.
@@ -76,7 +81,9 @@ The new decision workflow contributes conditional, fallback, grouped-window,
 and explicit-filter references to this cross-language comparison.
 It also includes rc3 join audits (including a self-join), group transforms,
 and compound condition trees. rc4 adds ordered cases, near-key matches
-(including a self-join), and grouped ranks.
+(including a self-join), and grouped ranks. rc5 also compares compressed group
+references (including an excluded large-group row), a fractional-change window,
+and empty time bins.
 
 ## Interactive checks
 
@@ -109,6 +116,11 @@ reading, one reused right reading, and a readable three-minute tolerance. A
 selected rank showed both tied candidate scores and separate group-key inputs.
 At 390×844, the ordered-case inspector and nearby-join audit each stayed within
 the 390-pixel document width; wide tables scroll within their own stage.
+The rc5 time-bucket page showed six colored bins, including two empty intervals;
+the fractional-change inspector kept both inputs behind an infinite result.
+Their 390×844 document width stayed at 390 pixels. The 50,000-row shared-group
+HTML opened in Chromium, displayed its ranked result, and jumped to source-use
+number 50,000. This checks interaction, not a cross-browser performance guarantee.
 
 The notebook check executes the shipped notebook in an isolated kernel, inspects
 its rich-output markup, and shuts the kernel down. The sandboxed player can also be
@@ -116,7 +128,7 @@ checked separately in a browser. A kernel check alone does not verify every note
 frontend or screen reader.
 The 50,000-row analysis example also completed, producing eight result rows and
 an 11,187,317-byte self-contained HTML file. This is a smoke run, not a
-performance benchmark for the new rc4 operations.
+performance benchmark for the newer operations.
 
 ## Distribution and scope
 
@@ -129,8 +141,9 @@ present in the installed package and HTML output.
 The fresh-install smoke also executes conditional selection, coalescing,
 cumulative windows, explicit filtering, compound outcomes, join audits, group
 transforms, ordered cases, near-key joins, ranks, and their decision/value
-provenance with runtime socket connections blocked. The checked wheel and
-sdist hashes are in the local `V1拡張4/distribution.json` release evidence.
+provenance, shared group references, fractional change, and time buckets with
+runtime socket connections blocked. The checked wheel and sdist hashes are in
+the local `V1拡張5/distribution.json` release evidence.
 
 The repository configures Linux/macOS/Windows CI. That remote matrix has **not**
 been run while publication is on hold. Actual GUI checks here cover Chromium;
@@ -140,4 +153,4 @@ limits; these checks do not establish suitability for arbitrary or unbounded dat
 
 Earlier 0.1 measurements and frontend checks are retained in
 [the historical validation record](validation-0.1.md). In particular, its memory
-and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc4.
+and timing measurements describe the earlier revision, not a benchmark of 1.0.0rc5.

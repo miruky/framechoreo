@@ -134,6 +134,26 @@ Raw source highlighting uses the reachable reference graph, not an expanded list
 every repeated use. Returning to the selected cell restores the scene, row page,
 expanded view, and remaining playback hold.
 
+For a large `group_transform` or `rank_within`, run:
+
+```sh
+python examples/large_group_workflow.py --rows 50000
+```
+
+The same 50,000 candidate values can affect every result row. FrameChoreo keeps
+the candidate tuple once in Python and switches the exported display model to
+schema version 2 when explicit repeated references would exceed 250,000.
+The player derives immediate candidates from validated group membership only
+when inspecting a result. A source-use count remains exact, and **Input number**
+can jump to the last candidate. The synthetic 50,000-row broadcast-and-rank
+example produced an approximately 4.6 MB HTML file and was opened and inspected in
+Chromium, including input number 50,000. This describes that example only;
+the browser still parses all captured rows and a selected large group still
+needs time and memory to enumerate its distinct candidates.
+
+The cumulative `window` operations continue to have the 250,000-reference
+limit. Their expanding prefixes are not encoded as shared group candidates.
+
 `explain()` keeps its complete-list behavior and default 10,000-input guard.
 `explain_page(row, column, offset=0, limit=50)` returns an immutable `OriginPage`:
 

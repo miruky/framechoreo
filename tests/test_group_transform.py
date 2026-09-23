@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from framechoreo import CaptureLimitError, DataStory
+from framechoreo import DataStory
 
 
 @pytest.mark.parametrize("op", ["sum", "mean", "min", "max", "count", "nunique"])
@@ -66,7 +66,7 @@ def test_group_transform_empty_and_all_excluded_inputs():
     assert result.explain(0, "average") == ()
 
 
-def test_group_transform_rejects_invalid_options_and_provenance_explosion():
+def test_group_transform_rejects_invalid_options():
     story = DataStory()
     source = story.table(pd.DataFrame({"g": ["a", "a"], "v": [1, 2]}))
     with pytest.raises(ValueError):
@@ -74,8 +74,20 @@ def test_group_transform_rejects_invalid_options_and_provenance_explosion():
     with pytest.raises(ValueError):
         source.group_transform("bad", by="g", value="v", op="mean", dropna=False, min_count=2)
     assert len(story.to_dict()["steps"]) == 1
+
+
+def test_large_group_transform_shares_references_without_losing_sources():
     analysis = DataStory.for_analysis()
     big = analysis.table(pd.DataFrame({"g": ["x"] * 1000, "v": range(1000)}))
-    with pytest.raises(CaptureLimitError, match="250,000"):
-        big.group_transform("total", by="g", value="v", op="sum", dropna=False)
-    assert len(analysis.to_dict()["steps"]) == 1
+    total = big.group_transform("total", by="g", value="v", op="sum", dropna=False)
+    assert total.to_pandas()["total"].iloc[0] == 499500
+    payload = analysis.to_dict(result=total)
+    assert payload["schema_version"] == 2
+    assert payload["steps"][-1]["parameters"]["lineage_encoding"] == "shared_group"
+    assert payload["steps"][-1]["rows"][0]["cell_parents"]["total"] == []
+    assert payload["steps"][-1]["rows"][0]["cell_controls"]["total"] == []
+    assert len(analysis.to_json(result=total)) < 1_000_000
+    assert len(total.explain_controls(0, "total")) == 1000
+    page = total.explain_page(0, "total", offset=998, limit=5)
+    assert page.total == 1000
+    assert [origin.row for origin in page.origins] == [998, 999]

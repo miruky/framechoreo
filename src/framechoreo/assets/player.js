@@ -209,6 +209,7 @@
         filter_by: "Decision filter",
         merge: "Join",
         merge_asof: "Nearby join",
+        time_resample: "Time buckets",
         group: "Group",
         sum: "Sum",
         mean: "Mean",
@@ -242,6 +243,7 @@
         filter_by: "条件で抽出",
         merge: "結合",
         merge_asof: "近い時刻で結合",
+        time_resample: "時間枠で集計",
         group: "グループ",
         sum: "合計",
         mean: "平均",
@@ -1197,6 +1199,17 @@
             ),
           ),
         );
+      else if (scene.kind === "time_resample")
+        legend.append(
+          legendItem(
+            "data-kind",
+            "group",
+            tx(
+              "Each T label is one time bucket. Non-missing values move from rows inside it; empty buckets have no invented input.",
+              "T番号は時間枠です。枠内の欠損でない値だけが移動し、空の枠に架空の入力は作りません。",
+            ),
+          ),
+        );
       else if (scene.kind === "group_transform")
         legend.append(
           legendItem(
@@ -1693,6 +1706,7 @@
           [
             "merge",
             "merge_asof",
+            "time_resample",
             "melt",
             "pivot",
             "calculate",
@@ -1716,19 +1730,25 @@
               ? [scene.step.parameters.value_name]
               : scene.kind === "pivot"
                 ? scene.step.parameters.output_columns
-                : [
-                      "calculate",
-                      "case_when",
-                      "case_select",
-                      "coalesce",
-                      "window",
-                      "group_transform",
-                      "rank_within",
-                    ].includes(scene.kind)
-                  ? [scene.step.parameters.name]
-                  : scene.table.columns;
+                : scene.kind === "time_resample"
+                  ? [scene.step.parameters.value]
+                  : [
+                        "calculate",
+                        "case_when",
+                        "case_select",
+                        "coalesce",
+                        "window",
+                        "group_transform",
+                        "rank_within",
+                      ].includes(scene.kind)
+                    ? [scene.step.parameters.name]
+                    : scene.table.columns;
           for (const column of columns) {
-            const refs = row.cell_parents[column] || [];
+            const refs = model.valueParents(steps, {
+              step: scene.step.id,
+              row: row.position,
+              column,
+            });
             for (const ref of refs)
               if (
                 !["merge", "merge_asof"].includes(scene.kind) ||
@@ -1741,7 +1761,9 @@
                 ? row.position
                 : ["group_transform", "rank_within"].includes(scene.kind)
                   ? scene.step.parameters.row_groups[row.position]
-                  : null,
+                  : scene.kind === "time_resample"
+                    ? row.position
+                    : null,
               target: findBoardCell({ step: scene.table.id, row: row.position, column }),
             });
           }
@@ -1782,11 +1804,8 @@
           if (!visibleCell(target)) continue;
           const to = target.getBoundingClientRect();
           for (const ref of refs) {
-            if (
-              (["merge", "merge_asof"].includes(scene.kind) &&
-                ref.step !== scene.step.parents[1]) ||
-              flows.length >= 48
-            )
+            if (flows.length >= 48) break;
+            if (["merge", "merge_asof"].includes(scene.kind) && ref.step !== scene.step.parents[1])
               continue;
             const source = (["merge", "merge_asof"].includes(scene.kind) ? sources : oldCells).get(
               model.cellKey(ref.step, ref.row, ref.column),
@@ -2009,7 +2028,14 @@
         number.setAttribute("role", "rowheader");
         if (entry.group !== null && scene.kind !== "group") {
           number.classList.add("with-group");
-          number.append(el("span", "group-id", "G" + (entry.group + 1)));
+          number.append(
+            el(
+              "span",
+              "group-id",
+              (steps.get(entry.groupStep)?.operation === "time_resample" ? "T" : "G") +
+                (entry.group + 1),
+            ),
+          );
           number.title = model.groupTitle({ step: steps.get(entry.groupStep) }, entry.group);
         }
         node.append(number);
@@ -2062,6 +2088,7 @@
         aggregate: "集計",
         group_transform: "グループ指標",
         rank_within: "グループ順位",
+        time_resample: "時間枠集計",
         sort: "並べ替え",
         select: "列選択",
         rename: "名前変更",
@@ -2091,6 +2118,7 @@
         group_transform: "GROUP METRIC",
         rank_within: "GROUP RANK",
         merge_asof: "NEARBY JOIN",
+        time_resample: "TIME BUCKETS",
       };
       operation.textContent =
         language === "ja"
@@ -2179,6 +2207,27 @@
             "。",
         );
       }
+      if (scene.kind === "time_resample") {
+        const p = scene.step.parameters;
+        note = tx(
+          p.rule +
+            " buckets; " +
+            p.closed +
+            " edge included, " +
+            p.bin_label +
+            " edge labeled. " +
+            p.empty_bins.length +
+            " empty buckets remain visible.",
+          p.rule +
+            "ごとの時間枠です。" +
+            (p.closed === "left" ? "左" : "右") +
+            "側を含み、" +
+            (p.bin_label === "left" ? "左" : "右") +
+            "側の時刻で表示します。空の時間枠も" +
+            p.empty_bins.length +
+            "件残します。",
+        );
+      }
       if (["group", "sum", "mean", "count", "aggregate"].includes(scene.kind)) {
         const gp = scene.step.parameters;
         note =
@@ -2217,10 +2266,16 @@
           "列を左から調べ、最初の欠損でない値を結果へ移します。欠損だった候補は判定入力として残します。",
         );
       if (scene.kind === "window")
-        note = tx(
-          "Rows are used in their current order. Sort first for a chronological result; inspect a result for exact window members.",
-          "現在の行順で計算します。時系列なら先に並べ替えてください。結果のセルから対象行を確認できます。",
-        );
+        note =
+          scene.step.parameters.op === "pct_change"
+            ? tx(
+                "Fractional change uses the current and earlier value in row order. Multiply by 100 to show a percentage; select a result to inspect both inputs.",
+                "行順で現在値と前の値から相対変化を計算します。百分率には100倍します。結果を選ぶと両方の入力を確認できます。",
+              )
+            : tx(
+                "Rows are used in their current order. Sort first for a chronological result; inspect a result for exact window members.",
+                "現在の行順で計算します。時系列なら先に並べ替えてください。結果のセルから対象行を確認できます。",
+              );
       if (scene.kind === "group_transform") {
         const p = scene.step.parameters;
         note = tx(

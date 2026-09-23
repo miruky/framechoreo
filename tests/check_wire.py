@@ -225,6 +225,26 @@ def main():
     )
     cases.append((extrema, [source, low, high, recent_low, recent_high]))
 
+    growth = DataStory()
+    source = growth.table(pd.DataFrame({"store": ["A", "B", "A", "B"], "v": [0, 100, 10, 150]}))
+    changed = source.window("change", column="v", op="pct_change", by="store")
+    cases.append((growth, [source, changed]))
+
+    buckets = DataStory()
+    source = buckets.table(
+        pd.DataFrame(
+            {
+                "time": pd.to_datetime(
+                    ["2026-01-01 10:00", "2026-01-01 10:01", "2026-01-01 10:06"]
+                ),
+                "sensor": ["A", "A", "A"],
+                "v": [1.0, 2.0, 3.0],
+            }
+        )
+    )
+    bucketed = source.resample_time(on="time", by="sensor", value="v", rule="3min", op="mean")
+    cases.append((buckets, [source, bucketed]))
+
     audited = DataStory()
     left = audited.table(pd.DataFrame({"key": ["a", "b", None], "amount": [10, 20, 30]}))
     right = audited.table(pd.DataFrame({"code": ["a", "a", None], "kind": ["x", "y", "z"]}))
@@ -335,6 +355,92 @@ def main():
                         }
                     )
         contracts.append({"data": story.to_dict(), "checks": checks})
+    compact = DataStory.for_analysis()
+    source = compact.table(
+        pd.DataFrame({"group": ["A"] * 600, "score": pd.array([*range(599), None], dtype="Int64")})
+    )
+    repeated = source.group_transform("total", by="group", value="score", op="sum", dropna=False)
+    ranked = repeated.rank_within("rank", by="group", value="score")
+    compact_checks = []
+    for frame, row, column in [
+        (repeated, 0, "total"),
+        (ranked, 0, "rank"),
+        (ranked, 599, "rank"),
+    ]:
+        compact_checks.append(
+            {
+                "reference": {"step": frame.step_id, "row": row, "column": column},
+                "inputs": [
+                    {
+                        "step": origin.step_id,
+                        "row": origin.row,
+                        "column": origin.column,
+                        "cell": encode_cell(origin.value),
+                    }
+                    for origin in frame.explain(row, column)
+                ],
+                "controls": [
+                    {
+                        "step": origin.step_id,
+                        "row": origin.row,
+                        "column": origin.column,
+                        "cell": encode_cell(origin.value),
+                    }
+                    for origin in frame.explain_controls(row, column)
+                ],
+            }
+        )
+    compact_page = ranked.explain_page(0, "rank", offset=597, limit=5)
+    contracts.append(
+        {
+            "data": compact.to_dict(result=ranked),
+            "checks": compact_checks,
+            "page_checks": [
+                {
+                    "reference": {"step": ranked.step_id, "row": 0, "column": "rank"},
+                    "offset": str(compact_page.offset),
+                    "total": str(compact_page.total),
+                    "inputs": [
+                        {
+                            "step": origin.step_id,
+                            "row": origin.row,
+                            "column": origin.column,
+                            "cell": encode_cell(origin.value),
+                        }
+                        for origin in compact_page.origins
+                    ],
+                }
+            ],
+        }
+    )
+    excluded_story = DataStory.for_analysis()
+    excluded_source = excluded_story.table(
+        pd.DataFrame({"group": ["A"] * 600 + [None], "score": [*range(600), 1]})
+    )
+    excluded_metric = excluded_source.group_transform(
+        "total", by="group", value="score", op="sum", dropna=True
+    )
+    assert excluded_story.to_dict(result=excluded_metric)["schema_version"] == 2
+    contracts.append(
+        {
+            "data": excluded_story.to_dict(result=excluded_metric),
+            "checks": [
+                {
+                    "reference": {"step": excluded_metric.step_id, "row": 600, "column": "total"},
+                    "inputs": [],
+                    "controls": [
+                        {
+                            "step": origin.step_id,
+                            "row": origin.row,
+                            "column": origin.column,
+                            "cell": encode_cell(origin.value),
+                        }
+                        for origin in excluded_metric.explain_controls(600, "total")
+                    ],
+                }
+            ],
+        }
+    )
     story = DataStory()
     source = story.table(
         pd.DataFrame({"key": ["all"] * 100, "v": pd.Series([pd.NA] * 100, dtype="Int64")})
