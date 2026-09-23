@@ -10,6 +10,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
+import tomllib
 import venv
 import zipfile
 from pathlib import Path
@@ -134,7 +135,9 @@ def main() -> None:
             "tests/fixtures/range_window.json",
             "package-lock.json",
             ".prettierrc.json",
+            ".gitattributes",
             "examples/sales_story.py",
+            "examples/build_public_demo.py",
             "examples/notebook.ipynb",
             "examples/float_precision.py",
             "examples/blank_strings.py",
@@ -155,12 +158,24 @@ def main() -> None:
             "examples/large_group_workflow.py",
             "examples/large_window_workflow.py",
             "docs/v1.md",
+            "docs/index.html",
             "docs/analysis.md",
             "docs/api.md",
             "docs/reader-evaluation.md",
             "LICENSE",
         ]:
             assert prefix + "/" + name in sdist_names, name
+
+    demo = (root / "docs" / "index.html").read_text(encoding="utf-8")
+    version = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "version"
+    ]
+    assert f'"library_version":"{version}"' in demo
+    assert '<script id="framechoreo-data"' in demo
+    for asset in ("model.js", "charts.js", "workbench.js", "player.js"):
+        assert (root / "src" / "framechoreo" / "assets" / asset).read_text(
+            encoding="utf-8"
+        ) in demo, asset
 
     readme = (root / "README.md").read_text(encoding="utf-8")
     example = re.search(r"```python\n(.*?)\n```", readme, re.S).group(1)

@@ -5,7 +5,10 @@ does not mean a GitHub repository or PyPI project already exists.
 
 1. Confirm the project name and inspect the final source diff.
 2. Run Python tests on both supported pandas lines, player-model tests, and lint.
-3. Generate examples and inspect the player in a browser, including a narrow view.
+3. Generate examples and `docs/index.html` with `python examples/build_public_demo.py`;
+   inspect the player in a browser, including a narrow view. The standalone demo
+   contains synthetic data and can become the GitHub Pages entry point after
+   Pages is explicitly enabled for the repository's `/docs` folder.
    Run the DOM accessibility check and inspect focus, contrast, and a screen
    reader in real browsers; the automated check alone is incomplete.
 4. Build wheel and sdist, run `twine check`, and install the wheel outside the checkout.
@@ -58,6 +61,7 @@ python -m mypy src/framechoreo
 python -m pip install pip-audit==2.10.1
 python -m pip_audit .
 python examples/sales_story.py
+python examples/build_public_demo.py
 python examples/missing_values.py
 python examples/classroom.py
 python examples/float_precision.py

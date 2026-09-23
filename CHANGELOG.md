@@ -7,6 +7,7 @@
 - Add provenance-linked, group-labeled line and scatter plots with separate unplotted-value inspection and safe plotting of extreme finite values; extract chart rendering into its own player module.
 - Add compact exact lineage for large cumulative and fixed rolling windows, including late-page and missing-member verification across Python and JavaScript.
 - Add mypy checks, dependency audits, and automated DOM accessibility checks; correct a mislabeled ARIA group, update the security support notice, and provide an independent-reader evaluation protocol.
+- Add an install-free synthetic HTML demo and a shorter README entry point for readers who find the repository through GitHub.
 
 ## 1.0.0rc5 — Unpublished candidate
 

@@ -164,7 +164,7 @@ transforms, ordered cases, near-key joins, ranks, and their decision/value
 provenance, shared group and window references, fractional change, time buckets,
 and reviewed source-column approval with
 runtime socket connections blocked. The checked wheel and sdist hashes are in
-the local `V1拡張6/distribution.json` release evidence.
+the local `公開準備1/distribution.json` release evidence.
 
 The project dependency audit with pip-audit 2.10.1 reported no known
 vulnerabilities in its resolved pandas, NumPy, python-dateutil, and six versions

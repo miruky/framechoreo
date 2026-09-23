@@ -11,6 +11,12 @@ is needed to replay it.
 
 [日本語](README.ja.md) · [API](docs/api.md) · [Design](docs/design.md) · [Examples](examples/)
 
+**See the result before installing:** [download the standalone demo](docs/index.html)
+and open the HTML file in a browser. Select **Add the sales in each category**, then
+select the Books total `270`: its source rows contain `120` and `150`. The demo uses
+synthetic data and needs no server. On GitHub, download the raw HTML rather than
+viewing its source.
+
 FrameChoreo is for teachers, technical writers, and analysts explaining how a
 result was made. **1.0.0rc6 is a local release candidate; it has not been published.**
 Operations are explicit; pandas computes their table and numeric results. [The 1.0 guide](docs/v1.md)

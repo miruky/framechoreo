@@ -50,6 +50,7 @@ jobs:
       - run: npm test
       - run: python tests/check_wire.py
       - run: python examples/sales_story.py
+      - run: python examples/build_public_demo.py
       - run: python examples/missing_values.py
       - run: python examples/classroom.py
       - run: python examples/float_precision.py

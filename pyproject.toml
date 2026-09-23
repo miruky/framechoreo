@@ -32,7 +32,7 @@ notebook = ["jupyterlab>=4.4,<5", "nbclient>=0.10,<1"]
 packages = ["src/framechoreo"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/", "tests/", "examples/*.py", "examples/*.ipynb", "docs/", "README.md", "README.ja.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "pyproject.toml", "package.json", "package-lock.json", ".prettierrc.json", ".github/", ".gitignore"]
+include = ["src/", "tests/", "examples/*.py", "examples/*.ipynb", "docs/", "README.md", "README.ja.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md", "pyproject.toml", "package.json", "package-lock.json", ".prettierrc.json", ".github/", ".gitignore", ".gitattributes"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
